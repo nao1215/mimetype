@@ -92,6 +92,16 @@ const signatures = [
   Bytes("application/gzip", [#(0, <<0x1F, 0x8B>>)]),
   Bytes("application/x-bzip2", [#(0, <<0x42, 0x5A, 0x68>>)]),
   Bytes("application/x-xz", [#(0, <<0xFD, 0x37, 0x7A, 0x58, 0x5A, 0x00>>)]),
+  Bytes("application/x-lz4", [#(0, <<0x04, 0x22, 0x4D, 0x18>>)]),
+  Bytes("application/x-lz4", [#(0, <<0x02, 0x21, 0x4C, 0x18>>)]),
+  Bytes("application/x-lzip", [#(0, <<"LZIP":utf8>>)]),
+  Bytes(
+    "application/x-snappy-framed",
+    [#(0, <<0xFF, 0x06, 0x00, 0x00, 0x73, 0x4E, 0x61, 0x50, 0x70, 0x59>>)],
+  ),
+  Bytes("application/x-compress", [#(0, <<0x1F, 0x9D>>)]),
+  Bytes("application/x-archive", [#(0, <<"!<arch>":utf8, 0x0A>>)]),
+  Check("application/x-lzh-compressed", has_lzh_magic),
   Bytes(
     "application/x-7z-compressed",
     [#(0, <<0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C>>)],
@@ -172,6 +182,7 @@ const signatures = [
   Check("text/html", looks_like_html),
   Check("image/svg+xml", looks_like_svg),
   Check("text/xml", looks_like_xml),
+  Check("application/x-deflate", has_zlib_magic),
 ]
 
 /// Try to recognize a MIME type from a leading byte signature.
@@ -665,4 +676,26 @@ fn skip_until_literal(
 
 fn starts_with_literal(bytes: BitArray, literal: BitArray) -> Bool {
   match_byte_prefix(bytes, literal) |> result.is_ok
+}
+
+fn has_lzh_magic(bytes: BitArray) -> Bool {
+  // LZH/LHA: `??-lh?-` where bytes 0-1 are size, 2-4 are `-lh`, 5 is the
+  // method digit, and 6 is the trailing `-`. We match the fixed parts and
+  // accept any byte at position 5.
+  has_bytes_at(bytes, 2, <<"-lh":utf8>>) && has_bytes_at(bytes, 6, <<"-":utf8>>)
+}
+
+fn has_zlib_magic(bytes: BitArray) -> Bool {
+  // RFC 1950 zlib stream: first byte 0x78 (CMF for deflate, 32K window),
+  // second byte one of the four valid (FLEVEL, FDICT) combinations whose
+  // CMF*256 + FLG is a multiple of 31. The check is heuristic — short
+  // binary inputs that happen to start with these bytes will false-positive.
+  // Placed at the end of `signatures` so this only fires when nothing else
+  // matched.
+  case bytes {
+    <<0x78, second:size(8), _:bits>>
+      if second == 0x01 || second == 0x5E || second == 0x9C || second == 0xDA
+    -> True
+    _ -> False
+  }
 }

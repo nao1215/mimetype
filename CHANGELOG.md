@@ -49,6 +49,12 @@
   (`video/x-matroska`) from WebM (`video/webm`) by inspecting the EBML
   DocType element within the first 256 bytes — a regression from the
   previous behavior where any EBML magic was reported as WebM. (#25)
+- Add `detect_with_limit` and `detect_with_limit_strict` plus the
+  `default_detection_limit = 3072` constant. Callers can now bound
+  the number of leading bytes the detector inspects, matching the
+  knob Go's `gabriel-vasile/mimetype` exposes via `SetLimit`. The
+  existing `detect`/`detect_strict` continue to work and are now
+  defined as `detect_with_limit(_, default_detection_limit)`. (#28)
 - Detect plain text as a final fallback. Inputs prefixed with a
   Unicode BOM are reported with the explicit charset
   (`text/plain; charset=utf-8`, `…charset=utf-16le`,

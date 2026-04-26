@@ -1040,3 +1040,89 @@ pub fn detect_text_plain_strict_returns_ok_test() {
   mimetype.detect_strict(<<"plain text":utf8>>)
   |> should.equal(Ok("text/plain"))
 }
+
+pub fn detect_with_limit_png_within_limit_test() {
+  // PNG signature is 8 bytes; a limit of exactly 8 must match.
+  mimetype.detect_with_limit(
+    <<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>,
+    8,
+  )
+  |> should.equal("image/png")
+}
+
+pub fn detect_with_limit_tar_below_offset_test() {
+  // TAR `ustar` magic sits at offset 257; a limit of 256 must cut it off.
+  let bytes = <<0:size({ 257 * 8 }), 0x75, 0x73, 0x74, 0x61, 0x72, 0:size(64)>>
+  mimetype.detect_with_limit(bytes, 256)
+  |> should.equal("application/octet-stream")
+}
+
+pub fn detect_with_limit_tar_above_offset_test() {
+  let bytes = <<0:size({ 257 * 8 }), 0x75, 0x73, 0x74, 0x61, 0x72, 0:size(64)>>
+  mimetype.detect_with_limit(bytes, 512)
+  |> should.equal("application/x-tar")
+}
+
+pub fn detect_with_limit_zip_within_4_bytes_test() {
+  // ZIP local file header `50 4B 03 04` fits in 4 bytes.
+  mimetype.detect_with_limit(<<0x50, 0x4B, 0x03, 0x04, 20, 0, 0, 0>>, 4)
+  |> should.equal("application/zip")
+}
+
+pub fn detect_with_limit_empty_bytes_test() {
+  mimetype.detect_with_limit(<<>>, 1024)
+  |> should.equal("application/octet-stream")
+}
+
+pub fn detect_with_limit_zero_test() {
+  mimetype.detect_with_limit(
+    <<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>,
+    0,
+  )
+  |> should.equal("application/octet-stream")
+}
+
+pub fn detect_with_limit_negative_treated_as_zero_test() {
+  mimetype.detect_with_limit(
+    <<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>,
+    -1,
+  )
+  |> should.equal("application/octet-stream")
+}
+
+pub fn detect_with_limit_default_matches_detect_test() {
+  // detect/1 must agree with detect_with_limit using the default cap on
+  // every existing fixture.
+  let png = <<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>
+  let json = <<"{\"x\":1}":utf8>>
+  let text = <<"hello":utf8>>
+  mimetype.detect(png)
+  |> should.equal(mimetype.detect_with_limit(
+    png,
+    mimetype.default_detection_limit,
+  ))
+  mimetype.detect(json)
+  |> should.equal(mimetype.detect_with_limit(
+    json,
+    mimetype.default_detection_limit,
+  ))
+  mimetype.detect(text)
+  |> should.equal(mimetype.detect_with_limit(
+    text,
+    mimetype.default_detection_limit,
+  ))
+}
+
+pub fn detect_with_limit_strict_returns_ok_test() {
+  mimetype.detect_with_limit_strict(
+    <<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>,
+    8,
+  )
+  |> should.equal(Ok("image/png"))
+}
+
+pub fn detect_with_limit_strict_returns_error_when_below_offset_test() {
+  let bytes = <<0:size({ 257 * 8 }), 0x75, 0x73, 0x74, 0x61, 0x72, 0:size(64)>>
+  mimetype.detect_with_limit_strict(bytes, 100)
+  |> should.equal(Error(Nil))
+}

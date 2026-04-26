@@ -787,3 +787,53 @@ pub fn detect_font_strict_returns_ok_for_ttf_test() {
   mimetype.detect_strict(<<0x00, 0x01, 0x00, 0x00>>)
   |> should.equal(Ok("font/ttf"))
 }
+
+pub fn detect_psd_test() {
+  should_detect(<<0x38, 0x42, 0x50, 0x53>>, "image/vnd.adobe.photoshop")
+}
+
+pub fn detect_jp2_test() {
+  should_detect(
+    <<0x00, 0x00, 0x00, 0x0C, 0x6A, 0x50, 0x20, 0x20, 0x0D, 0x0A, 0x87, 0x0A>>,
+    "image/jp2",
+  )
+}
+
+pub fn detect_jxl_container_test() {
+  should_detect(
+    <<0x00, 0x00, 0x00, 0x0C, 0x4A, 0x58, 0x4C, 0x20, 0x0D, 0x0A, 0x87, 0x0A>>,
+    "image/jxl",
+  )
+}
+
+pub fn detect_jxl_codestream_test() {
+  should_detect(<<0xFF, 0x0A>>, "image/jxl")
+}
+
+pub fn detect_dds_test() {
+  should_detect(<<"DDS ":utf8>>, "image/vnd.ms-dds")
+}
+
+pub fn detect_hdr_radiance_test() {
+  should_detect(
+    <<"#?RADIANCE":utf8, 0x0A, "GAMMA=1.0":utf8>>,
+    "image/vnd.radiance",
+  )
+}
+
+pub fn detect_exr_test() {
+  should_detect(<<0x76, 0x2F, 0x31, 0x01>>, "image/x-exr")
+}
+
+pub fn detect_qoi_test() {
+  should_detect(<<"qoif":utf8, 0, 0, 0, 0>>, "image/x-qoi")
+}
+
+pub fn detect_fits_test() {
+  should_detect(<<"SIMPLE  = ":utf8, "T":utf8>>, "image/fits")
+}
+
+pub fn detect_image_strict_returns_ok_for_psd_test() {
+  mimetype.detect_strict(<<0x38, 0x42, 0x50, 0x53>>)
+  |> should.equal(Ok("image/vnd.adobe.photoshop"))
+}

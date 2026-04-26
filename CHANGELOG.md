@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.2.0] - 2026-04-26
+
 - Detect `application/json` from leading bytes via a bounded JSON-prefix
   validator. Top-level objects (`{...}`) and arrays (`[...]`) are recognized
   after optional UTF-8 BOM and whitespace, including truncated inputs.

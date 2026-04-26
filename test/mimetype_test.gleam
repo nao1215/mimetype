@@ -325,9 +325,10 @@ pub fn detect_single_png_byte_falls_back_to_default_test() {
   |> should.equal("application/octet-stream")
 }
 
-pub fn detect_single_gif_byte_falls_back_to_default_test() {
+pub fn detect_single_gif_byte_classified_as_text_test() {
+  // After #20, single ASCII byte falls through to the text/plain heuristic.
   mimetype.detect(<<"G":utf8>>)
-  |> should.equal("application/octet-stream")
+  |> should.equal("text/plain")
 }
 
 pub fn detect_tar_boundary_does_not_false_positive_before_offset_test() {
@@ -356,7 +357,8 @@ pub fn detect_mp4_family_formats_test() {
 }
 
 pub fn detect_near_miss_signatures_fall_back_to_default_test() {
-  should_fall_back(<<"GIF87b":utf8>>)
+  // ASCII near-miss falls through to text/plain after #20.
+  should_detect(<<"GIF87b":utf8>>, "text/plain")
   should_fall_back(<<0x50, 0x4B, 0x00, 0x00>>)
   should_fall_back(<<0xFF, 0xD8, 0x00>>)
 }
@@ -483,11 +485,12 @@ pub fn detect_json_nested_object_test() {
 }
 
 pub fn detect_json_rejects_unquoted_words_test() {
-  should_fall_back(<<"{ this is not json }":utf8>>)
+  // JSON detector correctly rejects; falls through to text/plain (ASCII).
+  should_detect(<<"{ this is not json }":utf8>>, "text/plain")
 }
 
 pub fn detect_json_rejects_plain_text_test() {
-  should_fall_back(<<"Hello world":utf8>>)
+  should_detect(<<"Hello world":utf8>>, "text/plain")
 }
 
 pub fn detect_json_html_input_matches_html_test() {
@@ -495,39 +498,40 @@ pub fn detect_json_html_input_matches_html_test() {
 }
 
 pub fn detect_json_rejects_bare_number_test() {
-  should_fall_back(<<"42":utf8>>)
+  should_detect(<<"42":utf8>>, "text/plain")
 }
 
 pub fn detect_json_rejects_bare_string_test() {
-  should_fall_back(<<"\"foo\"":utf8>>)
+  should_detect(<<"\"foo\"":utf8>>, "text/plain")
 }
 
 pub fn detect_json_rejects_bare_true_test() {
-  should_fall_back(<<"true":utf8>>)
+  should_detect(<<"true":utf8>>, "text/plain")
 }
 
 pub fn detect_json_rejects_bom_only_test() {
-  should_fall_back(<<0xEF, 0xBB, 0xBF>>)
+  // After #20, a lone UTF-8 BOM is classified as text/plain; charset=utf-8.
+  should_detect(<<0xEF, 0xBB, 0xBF>>, "text/plain; charset=utf-8")
 }
 
 pub fn detect_json_rejects_open_brace_with_garbage_test() {
-  should_fall_back(<<"{abc":utf8>>)
+  should_detect(<<"{abc":utf8>>, "text/plain")
 }
 
 pub fn detect_json_rejects_object_with_unquoted_key_test() {
-  should_fall_back(<<"{key: 1}":utf8>>)
+  should_detect(<<"{key: 1}":utf8>>, "text/plain")
 }
 
 pub fn detect_json_rejects_object_missing_colon_test() {
-  should_fall_back(<<"{\"key\" 1}":utf8>>)
+  should_detect(<<"{\"key\" 1}":utf8>>, "text/plain")
 }
 
 pub fn detect_json_rejects_trailing_comma_in_object_test() {
-  should_fall_back(<<"{\"a\":1,}":utf8>>)
+  should_detect(<<"{\"a\":1,}":utf8>>, "text/plain")
 }
 
 pub fn detect_json_rejects_trailing_comma_in_array_test() {
-  should_fall_back(<<"[1,2,]":utf8>>)
+  should_detect(<<"[1,2,]":utf8>>, "text/plain")
 }
 
 pub fn detect_json_strict_returns_ok_test() {
@@ -544,7 +548,7 @@ pub fn detect_json_object_with_multibyte_utf8_value_test() {
 }
 
 pub fn detect_json_rejects_whitespace_only_test() {
-  should_fall_back(<<" \n\t\r ":utf8>>)
+  should_detect(<<" \n\t\r ":utf8>>, "text/plain")
 }
 
 pub fn detect_json_truncated_after_whitespace_test() {
@@ -603,23 +607,23 @@ pub fn detect_html_truncated_tag_test() {
 }
 
 pub fn detect_html_rejects_unknown_tag_test() {
-  should_fall_back(<<"<not-a-known-tag>":utf8>>)
+  should_detect(<<"<not-a-known-tag>":utf8>>, "text/plain")
 }
 
 pub fn detect_html_rejects_space_after_lt_test() {
-  should_fall_back(<<"< html>":utf8>>)
+  should_detect(<<"< html>":utf8>>, "text/plain")
 }
 
 pub fn detect_html_rejects_address_via_short_a_signature_test() {
-  should_fall_back(<<"<address>":utf8>>)
+  should_detect(<<"<address>":utf8>>, "text/plain")
 }
 
 pub fn detect_html_rejects_pre_via_short_p_signature_test() {
-  should_fall_back(<<"<pre>":utf8>>)
+  should_detect(<<"<pre>":utf8>>, "text/plain")
 }
 
 pub fn detect_html_rejects_plain_text_test() {
-  should_fall_back(<<"Hello world":utf8>>)
+  should_detect(<<"Hello world":utf8>>, "text/plain")
 }
 
 pub fn detect_xml_declaration_test() {
@@ -649,11 +653,11 @@ pub fn detect_xml_truncated_test() {
 }
 
 pub fn detect_xml_rejects_uppercase_declaration_test() {
-  should_fall_back(<<"<?XML version=\"1.0\"?>":utf8>>)
+  should_detect(<<"<?XML version=\"1.0\"?>":utf8>>, "text/plain")
 }
 
 pub fn detect_xml_rejects_processing_instruction_other_than_xml_test() {
-  should_fall_back(<<"<?php ?>":utf8>>)
+  should_detect(<<"<?php ?>":utf8>>, "text/plain")
 }
 
 pub fn detect_xml_strict_returns_ok_test() {
@@ -712,15 +716,15 @@ pub fn detect_svg_truncated_root_test() {
 }
 
 pub fn detect_svg_rejects_uppercase_root_test() {
-  // <SVG> is not SVG (XML element names are case-sensitive). It also does
-  // not match any HTML signature, so it falls through to octet-stream.
-  should_fall_back(<<"<SVG>":utf8>>)
+  // <SVG> is not SVG (XML element names are case-sensitive). After #20 it
+  // falls through to text/plain instead of octet-stream.
+  should_detect(<<"<SVG>":utf8>>, "text/plain")
 }
 
 pub fn detect_svg_rejects_extended_name_test() {
   // <svg-fake> must not match: after <svg, the next byte (-) is not a
-  // tag terminator.
-  should_fall_back(<<"<svg-fake>":utf8>>)
+  // tag terminator. Falls through to text/plain.
+  should_detect(<<"<svg-fake>":utf8>>, "text/plain")
 }
 
 pub fn detect_svg_xml_prolog_without_svg_falls_back_to_xml_test() {
@@ -956,4 +960,83 @@ pub fn detect_ebml_without_doctype_falls_back_test() {
 pub fn detect_av_strict_returns_ok_for_amr_test() {
   mimetype.detect_strict(<<"#!AMR":utf8, 0x0A>>)
   |> should.equal(Ok("audio/amr"))
+}
+
+pub fn detect_text_plain_utf8_bom_test() {
+  should_detect(
+    <<0xEF, 0xBB, 0xBF, "Hello world":utf8>>,
+    "text/plain; charset=utf-8",
+  )
+}
+
+pub fn detect_text_plain_utf16le_bom_test() {
+  should_detect(
+    <<0xFF, 0xFE, "H":utf8, 0x00, "i":utf8, 0x00>>,
+    "text/plain; charset=utf-16le",
+  )
+}
+
+pub fn detect_text_plain_utf16be_bom_test() {
+  should_detect(
+    <<0xFE, 0xFF, 0x00, "H":utf8, 0x00, "i":utf8>>,
+    "text/plain; charset=utf-16be",
+  )
+}
+
+pub fn detect_text_plain_utf32le_bom_test() {
+  should_detect(
+    <<0xFF, 0xFE, 0x00, 0x00, "H":utf8, 0x00, 0x00, 0x00>>,
+    "text/plain; charset=utf-32le",
+  )
+}
+
+pub fn detect_text_plain_utf32be_bom_test() {
+  should_detect(
+    <<0x00, 0x00, 0xFE, 0xFF, 0x00, 0x00, 0x00, "H":utf8>>,
+    "text/plain; charset=utf-32be",
+  )
+}
+
+pub fn detect_text_plain_ascii_only_test() {
+  should_detect(<<"Hello world\n":utf8>>, "text/plain")
+}
+
+pub fn detect_text_plain_config_style_test() {
+  should_detect(<<"key=value\n# comment\n":utf8>>, "text/plain")
+}
+
+pub fn detect_text_plain_with_tabs_and_crlf_test() {
+  should_detect(<<"a\tb\r\nc\td\r\n":utf8>>, "text/plain")
+}
+
+pub fn detect_text_plain_rejects_binary_with_nul_test() {
+  should_fall_back(<<0x00, 0x01, 0x02, 0x03>>)
+}
+
+pub fn detect_text_plain_rejects_binary_with_high_byte_test() {
+  // High byte (0x80+) without BOM = binary, not text/plain. JSON/HTML/etc.
+  // would already not match, so this verifies the heuristic falls through.
+  should_fall_back(<<"hello":utf8, 0xC3>>)
+}
+
+pub fn detect_text_plain_rejects_empty_test() {
+  // Empty stays at default; the text/plain heuristic must not catch empty.
+  mimetype.detect(<<>>)
+  |> should.equal("application/octet-stream")
+}
+
+pub fn detect_text_plain_does_not_steal_png_test() {
+  // PNG bytes start with 0x89 (binary) so the text heuristic must not fire.
+  should_detect(<<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>, "image/png")
+}
+
+pub fn detect_text_plain_does_not_steal_json_test() {
+  // JSON content classified as application/json, not text/plain, even though
+  // it's all printable ASCII. Verifies signature ordering (JSON before text).
+  should_detect(<<"{\"x\":1}":utf8>>, "application/json")
+}
+
+pub fn detect_text_plain_strict_returns_ok_test() {
+  mimetype.detect_strict(<<"plain text":utf8>>)
+  |> should.equal(Ok("text/plain"))
 }

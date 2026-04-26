@@ -49,6 +49,20 @@
   (`video/x-matroska`) from WebM (`video/webm`) by inspecting the EBML
   DocType element within the first 256 bytes — a regression from the
   previous behavior where any EBML magic was reported as WebM. (#25)
+- Detect plain text as a final fallback. Inputs prefixed with a
+  Unicode BOM are reported with the explicit charset
+  (`text/plain; charset=utf-8`, `…charset=utf-16le`,
+  `…charset=utf-16be`, `…charset=utf-32le`, `…charset=utf-32be`).
+  Inputs without a BOM that are entirely printable ASCII or HTML
+  whitespace within the first 1 KB are reported as `text/plain`.
+  Inputs containing C0 control bytes (other than tab/LF/FF/CR), 0x7F,
+  or any byte ≥ 0x80 are treated as binary and continue to fall back
+  to `application/octet-stream`. The check is registered as the final
+  signature so binary formats and other text formats are detected
+  first. **Behavior change**: inputs that previously fell through to
+  `application/octet-stream` but consist entirely of printable ASCII
+  (e.g. a config file, a CSV-without-extension, or a near-miss HTML
+  fragment) are now reported as `text/plain`. (#20)
 
 ## [0.1.0] - 2026-04-26
 

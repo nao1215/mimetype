@@ -202,6 +202,12 @@ const signatures = [
   Check("image/svg+xml", looks_like_svg),
   Check("text/xml", looks_like_xml),
   Check("application/x-deflate", has_zlib_magic),
+  Bytes("text/plain; charset=utf-32le", [#(0, <<0xFF, 0xFE, 0x00, 0x00>>)]),
+  Bytes("text/plain; charset=utf-32be", [#(0, <<0x00, 0x00, 0xFE, 0xFF>>)]),
+  Bytes("text/plain; charset=utf-16le", [#(0, <<0xFF, 0xFE>>)]),
+  Bytes("text/plain; charset=utf-16be", [#(0, <<0xFE, 0xFF>>)]),
+  Bytes("text/plain; charset=utf-8", [#(0, <<0xEF, 0xBB, 0xBF>>)]),
+  Check("text/plain", looks_like_plain_text),
 ]
 
 /// Try to recognize a MIME type from a leading byte signature.
@@ -764,4 +770,38 @@ fn contains_literal(bytes: BitArray, literal: BitArray, budget: Int) -> Bool {
     <<_, rest:bits>> -> contains_literal(rest, literal, budget - 1)
     _ -> False
   }
+}
+
+// Plain-text fallback: when no other signature matched, classify the input
+// as `text/plain` if the leading bytes are entirely printable ASCII or HTML
+// whitespace. Per WHATWG MIME Sniffing's binary-vs-text rule, the presence
+// of any C0 control byte (other than tab/LF/FF/CR), 0x7F, or any high byte
+// (0x80–0xFF) marks the input as binary. The check is bounded by
+// `text_sniff_budget` so that long text files terminate quickly.
+
+const text_sniff_budget = 1024
+
+fn looks_like_plain_text(bytes: BitArray) -> Bool {
+  use <- bool.guard(when: bytes == <<>>, return: False)
+  is_all_text_bytes(bytes, text_sniff_budget)
+}
+
+fn is_all_text_bytes(bytes: BitArray, budget: Int) -> Bool {
+  use <- bool.guard(when: budget <= 0, return: True)
+  case bytes {
+    <<>> -> True
+    <<b, rest:bits>> -> {
+      use <- bool.guard(when: !is_text_byte(b), return: False)
+      is_all_text_bytes(rest, budget - 1)
+    }
+    _ -> False
+  }
+}
+
+fn is_text_byte(byte: Int) -> Bool {
+  byte == 0x09
+  || byte == 0x0A
+  || byte == 0x0C
+  || byte == 0x0D
+  || { byte >= 0x20 && byte <= 0x7E }
 }

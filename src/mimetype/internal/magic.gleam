@@ -110,6 +110,7 @@ const signatures = [
   Bytes("video/mp4", [#(4, <<"ftyp":utf8>>), #(8, <<"avc1":utf8>>)]),
   Check("application/json", looks_like_json),
   Check("text/html", looks_like_html),
+  Check("image/svg+xml", looks_like_svg),
   Check("text/xml", looks_like_xml),
 ]
 
@@ -517,4 +518,91 @@ fn match_byte_prefix(bytes: BitArray, prefix: BitArray) -> Result(BitArray, Nil)
 fn ascii_to_lower(byte: Int) -> Int {
   use <- bool.guard(when: byte < 0x41 || byte > 0x5A, return: byte)
   byte + 32
+}
+
+// SVG sniffing: distinguish SVG from generic XML by looking for an `<svg`
+// root element. The XML declaration, DOCTYPE, comments, and whitespace
+// between them are skipped before the root-element check so that real-world
+// SVG files (which often start with a UTF-8 BOM, an `<?xml ?>` prolog, and
+// a `<!DOCTYPE svg ...>` declaration) are recognized.
+//
+// The `<svg` match is case-sensitive: XML element names are case-sensitive
+// per the XML 1.0 spec, so `<SVG>` is not SVG. The match also requires a
+// terminator that includes `/` so that self-closing `<svg/>` works.
+//
+// Walking is bounded by `svg_sniff_budget` to cap work on pathological
+// inputs (huge comments, huge DOCTYPE, etc.).
+
+const svg_sniff_budget = 4096
+
+fn looks_like_svg(bytes: BitArray) -> Bool {
+  let bytes = trim_text_prefix(bytes)
+  let bytes = skip_xml_prolog(bytes, svg_sniff_budget)
+  let bytes = skip_xml_misc(bytes, svg_sniff_budget)
+  match_byte_prefix(bytes, <<"<svg":utf8>>)
+  |> result.map(is_xml_element_terminator)
+  |> result.unwrap(False)
+}
+
+fn is_xml_element_terminator(bytes: BitArray) -> Bool {
+  case bytes {
+    <<>> -> True
+    <<0x20, _:bits>> -> True
+    <<0x09, _:bits>> -> True
+    <<0x0A, _:bits>> -> True
+    <<0x0C, _:bits>> -> True
+    <<0x0D, _:bits>> -> True
+    <<0x3E, _:bits>> -> True
+    <<0x2F, _:bits>> -> True
+    _ -> False
+  }
+}
+
+fn skip_xml_prolog(bytes: BitArray, budget: Int) -> BitArray {
+  match_byte_prefix(bytes, <<"<?xml":utf8>>)
+  |> result.map(skip_until_literal(_, <<"?>":utf8>>, budget))
+  |> result.unwrap(bytes)
+}
+
+fn skip_xml_misc(bytes: BitArray, budget: Int) -> BitArray {
+  use <- bool.guard(when: budget <= 0, return: bytes)
+  let trimmed = skip_html_ws(bytes)
+  use <- bool.lazy_guard(
+    when: starts_with_literal(trimmed, <<"<!--":utf8>>),
+    return: fn() {
+      skip_until_literal(trimmed, <<"-->":utf8>>, budget)
+      |> skip_xml_misc(budget - 1)
+    },
+  )
+  use <- bool.lazy_guard(
+    when: starts_with_literal(trimmed, <<"<!DOCTYPE":utf8>>),
+    return: fn() {
+      skip_until_literal(trimmed, <<">":utf8>>, budget)
+      |> skip_xml_misc(budget - 1)
+    },
+  )
+  trimmed
+}
+
+fn skip_until_literal(
+  bytes: BitArray,
+  literal: BitArray,
+  budget: Int,
+) -> BitArray {
+  use <- bool.guard(when: budget <= 0, return: bytes)
+  case starts_with_literal(bytes, literal) {
+    True ->
+      match_byte_prefix(bytes, literal)
+      |> result.unwrap(bytes)
+    False ->
+      case bytes {
+        <<>> -> bytes
+        <<_, rest:bits>> -> skip_until_literal(rest, literal, budget - 1)
+        _ -> bytes
+      }
+  }
+}
+
+fn starts_with_literal(bytes: BitArray, literal: BitArray) -> Bool {
+  match_byte_prefix(bytes, literal) |> result.is_ok
 }

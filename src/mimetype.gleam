@@ -6,9 +6,11 @@
 //// - combined helpers, which prefer content-based detection and fall
 ////   back to metadata when the byte signature is unknown
 
+import gleam/bit_array
 import gleam/bool
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/result
 import gleam/string
 import mimetype/internal/db
 import mimetype/internal/magic
@@ -16,6 +18,17 @@ import mimetype/internal/magic
 /// Fallback MIME type used when neither metadata nor byte signatures
 /// provide a more specific answer.
 pub const default_mime_type = db.default_mime_type
+
+/// Default upper bound on the number of leading bytes inspected by
+/// `detect` and `detect_strict`.
+///
+/// 3072 bytes is large enough for every signature this library ships
+/// (the largest fixed-offset check is `application/x-tar` at offset
+/// 257, plus envelope formats like ZIP central-directory inspection
+/// reach into the first few KB) and matches the default used by Go's
+/// `gabriel-vasile/mimetype` library. Pass an explicit limit via
+/// `detect_with_limit` / `detect_with_limit_strict` to override.
+pub const default_detection_limit = 3072
 
 /// Look up a MIME type from a file extension.
 ///
@@ -164,10 +177,7 @@ pub fn filename_to_mime_type_strict(path: String) -> Result(String, Nil) {
 /// If no signature matches, the default fallback MIME type is
 /// returned.
 pub fn detect(bytes: BitArray) -> String {
-  case detect_strict(bytes) {
-    Ok(mime_type) -> mime_type
-    Error(Nil) -> default_mime_type
-  }
+  detect_with_limit(bytes, default_detection_limit)
 }
 
 /// Detect a MIME type from the leading bytes of a blob.
@@ -175,7 +185,41 @@ pub fn detect(bytes: BitArray) -> String {
 /// This strict variant returns `Error(Nil)` when no supported
 /// magic-number signature matches.
 pub fn detect_strict(bytes: BitArray) -> Result(String, Nil) {
-  result_from_option(magic.detect(bytes))
+  detect_with_limit_strict(bytes, default_detection_limit)
+}
+
+/// Detect a MIME type from the leading bytes of a blob, examining at
+/// most `limit` bytes from the start of the input.
+///
+/// A non-positive `limit` is treated as zero, in which case no
+/// signature can match and the fallback MIME type is returned.
+/// Limits larger than the input are clamped to the input length.
+pub fn detect_with_limit(bytes: BitArray, limit: Int) -> String {
+  case detect_with_limit_strict(bytes, limit) {
+    Ok(mime_type) -> mime_type
+    Error(Nil) -> default_mime_type
+  }
+}
+
+/// Detect a MIME type from at most `limit` leading bytes.
+///
+/// Strict variant; returns `Error(Nil)` when no supported signature
+/// matches within the limit.
+pub fn detect_with_limit_strict(
+  bytes: BitArray,
+  limit: Int,
+) -> Result(String, Nil) {
+  result_from_option(magic.detect(truncate_to_limit(bytes, limit)))
+}
+
+fn truncate_to_limit(bytes: BitArray, limit: Int) -> BitArray {
+  let size = bit_array.byte_size(bytes)
+  let safe_limit = case limit < 0, limit > size {
+    True, _ -> 0
+    False, True -> size
+    False, False -> limit
+  }
+  bit_array.slice(bytes, 0, safe_limit) |> result.unwrap(<<>>)
 }
 
 /// Detect a MIME type from bytes, falling back to an explicit

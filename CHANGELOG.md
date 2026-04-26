@@ -26,6 +26,13 @@
   OpenType (`font/otf`), TrueType Collection (`font/collection`), WOFF
   (`font/woff`), WOFF2 (`font/woff2`), and Embedded OpenType
   (`application/vnd.ms-fontobject`). MIME types follow RFC 8081. (#22)
+- Detect nine additional image formats from leading-byte signatures:
+  Photoshop (`image/vnd.adobe.photoshop`), JPEG 2000 (`image/jp2`),
+  JPEG XL raw codestream and ISO BMFF container (both `image/jxl`),
+  DirectDraw Surface (`image/vnd.ms-dds`), Radiance HDR
+  (`image/vnd.radiance`), OpenEXR (`image/x-exr`), QOI (`image/x-qoi`),
+  and FITS (`image/fits`). Targa (TGA) is intentionally excluded
+  because its only reliable magic is at end-of-file. (#23)
 
 ## [0.1.0] - 2026-04-26
 

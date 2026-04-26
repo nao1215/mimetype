@@ -49,6 +49,14 @@
   (`video/x-matroska`) from WebM (`video/webm`) by inspecting the EBML
   DocType element within the first 256 bytes — a regression from the
   previous behavior where any EBML magic was reported as WebM. (#25)
+- Add a static MIME-type subtype tree and matching public predicates:
+  `is_a(mime, parent)` (reflexive + transitive), `is_zip_based`,
+  `is_xml_based`, and `ancestors`. Initial parent map covers OOXML
+  (`docx`/`xlsx`/`pptx`), OpenDocument (`odt`/`ods`/`odp`), `epub`,
+  `jar`, `apk` → `application/zip`; legacy MS Office (`doc`/`xls`/`ppt`)
+  → `application/x-ole-storage`; and `image/svg+xml` → `text/xml`.
+  Tree mirrors the design of Go's `gabriel-vasile/mimetype` (single
+  parent per child). (#26)
 - Add `detect_with_limit` and `detect_with_limit_strict` plus the
   `default_detection_limit = 3072` constant. Callers can now bound
   the number of leading bytes the detector inspects, matching the

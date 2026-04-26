@@ -6,7 +6,9 @@ This project redistributes data derived from the following third-party project.
 
 - Upstream: https://github.com/jshttp/mime-db
 - Files in this repository derived from it:
-  - `src/mimetype/internal/db.gleam`
+  - `src/mimetype/internal/db.gleam` (Gleam wrapper)
+  - `src/mimetype/internal/mimetype_db_ffi.erl` (Erlang lookup table)
+  - `src/mimetype/internal/db_ffi.mjs` (JavaScript lookup table)
 - Source data used during generation:
   - `doc/reference/upstream/mime-db/db.json`
 - License: MIT

@@ -428,3 +428,124 @@ pub fn detect_with_filename_prefers_magic_over_extension_test() {
   )
   |> should.equal("image/png")
 }
+
+pub fn detect_json_empty_object_test() {
+  should_detect(<<"{}":utf8>>, "application/json")
+}
+
+pub fn detect_json_empty_array_test() {
+  should_detect(<<"[]":utf8>>, "application/json")
+}
+
+pub fn detect_json_object_with_nested_array_test() {
+  should_detect(<<"{\"a\": 1, \"b\": [true, null]}":utf8>>, "application/json")
+}
+
+pub fn detect_json_array_of_numbers_test() {
+  should_detect(<<"[1, 2, 3]":utf8>>, "application/json")
+}
+
+pub fn detect_json_array_of_strings_test() {
+  should_detect(<<"[\"a\", \"b\", \"c\"]":utf8>>, "application/json")
+}
+
+pub fn detect_json_with_leading_whitespace_test() {
+  should_detect(<<"   \n  {\"a\":1}":utf8>>, "application/json")
+}
+
+pub fn detect_json_with_utf8_bom_test() {
+  should_detect(<<0xEF, 0xBB, 0xBF, "{\"a\":1}":utf8>>, "application/json")
+}
+
+pub fn detect_json_truncated_object_test() {
+  should_detect(<<"{\"a\": 1":utf8>>, "application/json")
+}
+
+pub fn detect_json_truncated_array_test() {
+  should_detect(<<"[1, 2,":utf8>>, "application/json")
+}
+
+pub fn detect_json_string_with_escaped_quote_test() {
+  should_detect(<<"{\"k\":\"a\\\"b\"}":utf8>>, "application/json")
+}
+
+pub fn detect_json_string_with_escaped_backslash_test() {
+  should_detect(<<"{\"k\":\"a\\\\b\"}":utf8>>, "application/json")
+}
+
+pub fn detect_json_negative_number_test() {
+  should_detect(<<"[-1, -2.5, -1e10]":utf8>>, "application/json")
+}
+
+pub fn detect_json_nested_object_test() {
+  should_detect(<<"{\"a\":{\"b\":{\"c\":1}}}":utf8>>, "application/json")
+}
+
+pub fn detect_json_rejects_unquoted_words_test() {
+  should_fall_back(<<"{ this is not json }":utf8>>)
+}
+
+pub fn detect_json_rejects_plain_text_test() {
+  should_fall_back(<<"Hello world":utf8>>)
+}
+
+pub fn detect_json_rejects_html_test() {
+  should_fall_back(<<"<html>":utf8>>)
+}
+
+pub fn detect_json_rejects_bare_number_test() {
+  should_fall_back(<<"42":utf8>>)
+}
+
+pub fn detect_json_rejects_bare_string_test() {
+  should_fall_back(<<"\"foo\"":utf8>>)
+}
+
+pub fn detect_json_rejects_bare_true_test() {
+  should_fall_back(<<"true":utf8>>)
+}
+
+pub fn detect_json_rejects_bom_only_test() {
+  should_fall_back(<<0xEF, 0xBB, 0xBF>>)
+}
+
+pub fn detect_json_rejects_open_brace_with_garbage_test() {
+  should_fall_back(<<"{abc":utf8>>)
+}
+
+pub fn detect_json_rejects_object_with_unquoted_key_test() {
+  should_fall_back(<<"{key: 1}":utf8>>)
+}
+
+pub fn detect_json_rejects_object_missing_colon_test() {
+  should_fall_back(<<"{\"key\" 1}":utf8>>)
+}
+
+pub fn detect_json_rejects_trailing_comma_in_object_test() {
+  should_fall_back(<<"{\"a\":1,}":utf8>>)
+}
+
+pub fn detect_json_rejects_trailing_comma_in_array_test() {
+  should_fall_back(<<"[1,2,]":utf8>>)
+}
+
+pub fn detect_json_strict_returns_ok_test() {
+  mimetype.detect_strict(<<"{\"x\":1}":utf8>>)
+  |> should.equal(Ok("application/json"))
+}
+
+pub fn detect_json_array_of_objects_test() {
+  should_detect(<<"[{\"a\":1},{\"b\":2}]":utf8>>, "application/json")
+}
+
+pub fn detect_json_object_with_multibyte_utf8_value_test() {
+  should_detect(<<"{\"name\":\"日本語\"}":utf8>>, "application/json")
+}
+
+pub fn detect_json_rejects_whitespace_only_test() {
+  should_fall_back(<<" \n\t\r ":utf8>>)
+}
+
+pub fn detect_json_truncated_after_whitespace_test() {
+  should_detect(<<"{\"a\":   ":utf8>>, "application/json")
+}

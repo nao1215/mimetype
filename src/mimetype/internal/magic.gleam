@@ -108,6 +108,7 @@ const signatures = [
   Bytes("video/mp4", [#(4, <<"ftyp":utf8>>), #(8, <<"mp41":utf8>>)]),
   Bytes("video/mp4", [#(4, <<"ftyp":utf8>>), #(8, <<"mp42":utf8>>)]),
   Bytes("video/mp4", [#(4, <<"ftyp":utf8>>), #(8, <<"avc1":utf8>>)]),
+  Check("application/json", looks_like_json),
 ]
 
 /// Try to recognize a MIME type from a leading byte signature.
@@ -178,5 +179,208 @@ fn has_bytes_at(bytes: BitArray, offset: Int, prefix: BitArray) -> Bool {
     False ->
       bit_array.slice(bytes, offset, prefix_size) |> result.unwrap(<<>>)
       == prefix
+  }
+}
+
+// JSON sniffing: recognize `application/json` from leading bytes.
+//
+// Detection scope (top level): only `{...}` and `[...]` are sniffed. Bare
+// scalars (numbers, strings, `true`/`false`/`null`) at the top level are
+// rejected because they false-positive on plain text. Inside containers,
+// numbers and the literals are accepted as element values.
+//
+// Truncated input (e.g. `{"a": 1`) is accepted as JSON: structural validity
+// of the prefix is sufficient for sniffing. Junk after `{` (e.g.
+// `{ this is not json }`) is rejected because the object body requires `"`
+// or `}` after whitespace.
+//
+// Walking is bounded by `json_sniff_budget` so that arbitrarily large inputs
+// short-circuit once enough valid prefix has been observed.
+
+const json_sniff_budget = 4096
+
+type JsonResult {
+  Valid(BitArray, Int)
+  Truncated
+  Invalid
+}
+
+fn looks_like_json(bytes: BitArray) -> Bool {
+  let stripped = json_strip_bom(bytes)
+  let #(after_ws, budget) = json_skip_ws(stripped, json_sniff_budget)
+  case after_ws {
+    <<0x7B, rest:bits>> ->
+      json_finalize(json_validate_object(rest, budget - 1, True))
+    <<0x5B, rest:bits>> ->
+      json_finalize(json_validate_array(rest, budget - 1, True))
+    _ -> False
+  }
+}
+
+fn json_finalize(result: JsonResult) -> Bool {
+  case result {
+    Valid(_, _) -> True
+    Truncated -> True
+    Invalid -> False
+  }
+}
+
+fn json_strip_bom(bytes: BitArray) -> BitArray {
+  case bytes {
+    <<0xEF, 0xBB, 0xBF, rest:bits>> -> rest
+    _ -> bytes
+  }
+}
+
+fn json_skip_ws(bytes: BitArray, budget: Int) -> #(BitArray, Int) {
+  use <- bool.guard(when: budget <= 0, return: #(bytes, budget))
+  case bytes {
+    <<0x20, rest:bits>> -> json_skip_ws(rest, budget - 1)
+    <<0x09, rest:bits>> -> json_skip_ws(rest, budget - 1)
+    <<0x0A, rest:bits>> -> json_skip_ws(rest, budget - 1)
+    <<0x0D, rest:bits>> -> json_skip_ws(rest, budget - 1)
+    _ -> #(bytes, budget)
+  }
+}
+
+fn json_then(
+  result: JsonResult,
+  next: fn(BitArray, Int) -> JsonResult,
+) -> JsonResult {
+  case result {
+    Valid(rest, budget) -> next(rest, budget)
+    Truncated -> Truncated
+    Invalid -> Invalid
+  }
+}
+
+fn json_validate_value(bytes: BitArray, budget: Int) -> JsonResult {
+  use <- bool.lazy_guard(when: budget <= 0, return: fn() { Truncated })
+  let #(b, budget) = json_skip_ws(bytes, budget)
+  case b {
+    <<>> -> Truncated
+    <<0x7B, rest:bits>> -> json_validate_object(rest, budget - 1, True)
+    <<0x5B, rest:bits>> -> json_validate_array(rest, budget - 1, True)
+    <<0x22, rest:bits>> -> json_skip_string(rest, budget - 1)
+    <<0x74, rest:bits>> -> json_match_literal(rest, <<"rue":utf8>>, budget - 1)
+    <<0x66, rest:bits>> -> json_match_literal(rest, <<"alse":utf8>>, budget - 1)
+    <<0x6E, rest:bits>> -> json_match_literal(rest, <<"ull":utf8>>, budget - 1)
+    <<0x2D, _:bits>> -> json_skip_number(b, budget)
+    <<x, _:bits>> if x >= 0x30 && x <= 0x39 -> json_skip_number(b, budget)
+    _ -> Invalid
+  }
+}
+
+fn json_validate_object(
+  bytes: BitArray,
+  budget: Int,
+  expecting_first: Bool,
+) -> JsonResult {
+  let #(b, budget) = json_skip_ws(bytes, budget)
+  case b {
+    <<>> -> Truncated
+    <<0x7D, rest:bits>> -> {
+      use <- bool.guard(when: !expecting_first, return: Invalid)
+      Valid(rest, budget - 1)
+    }
+    <<0x22, rest:bits>> -> json_validate_object_member(rest, budget - 1)
+    _ -> Invalid
+  }
+}
+
+fn json_validate_object_member(bytes: BitArray, budget: Int) -> JsonResult {
+  use after_key, budget <- json_then(json_skip_string(bytes, budget))
+  let #(b, budget) = json_skip_ws(after_key, budget)
+  case b {
+    <<>> -> Truncated
+    <<0x3A, after_colon:bits>> -> {
+      use after_value, budget <- json_then(json_validate_value(
+        after_colon,
+        budget - 1,
+      ))
+      let #(b, budget) = json_skip_ws(after_value, budget)
+      case b {
+        <<>> -> Truncated
+        <<0x2C, rest:bits>> -> json_validate_object(rest, budget - 1, False)
+        <<0x7D, rest:bits>> -> Valid(rest, budget - 1)
+        _ -> Invalid
+      }
+    }
+    _ -> Invalid
+  }
+}
+
+fn json_validate_array(
+  bytes: BitArray,
+  budget: Int,
+  expecting_first: Bool,
+) -> JsonResult {
+  let #(b, budget) = json_skip_ws(bytes, budget)
+  case b {
+    <<>> -> Truncated
+    <<0x5D, rest:bits>> -> {
+      use <- bool.guard(when: !expecting_first, return: Invalid)
+      Valid(rest, budget - 1)
+    }
+    _ -> {
+      use after_value, budget <- json_then(json_validate_value(b, budget))
+      let #(b, budget) = json_skip_ws(after_value, budget)
+      case b {
+        <<>> -> Truncated
+        <<0x2C, rest:bits>> -> json_validate_array(rest, budget - 1, False)
+        <<0x5D, rest:bits>> -> Valid(rest, budget - 1)
+        _ -> Invalid
+      }
+    }
+  }
+}
+
+fn json_skip_string(bytes: BitArray, budget: Int) -> JsonResult {
+  use <- bool.lazy_guard(when: budget <= 0, return: fn() { Truncated })
+  case bytes {
+    <<>> -> Truncated
+    <<0x22, rest:bits>> -> Valid(rest, budget - 1)
+    <<0x5C, _esc, rest:bits>> -> json_skip_string(rest, budget - 2)
+    <<0x5C>> -> Truncated
+    <<_b, rest:bits>> -> json_skip_string(rest, budget - 1)
+    _ -> Invalid
+  }
+}
+
+fn json_skip_number(bytes: BitArray, budget: Int) -> JsonResult {
+  use <- bool.lazy_guard(when: budget <= 0, return: fn() { Truncated })
+  case bytes {
+    <<>> -> Truncated
+    <<0x2D, rest:bits>> -> json_skip_number_digits(rest, budget - 1)
+    <<b, _:bits>> if b >= 0x30 && b <= 0x39 ->
+      json_skip_number_digits(bytes, budget)
+    _ -> Invalid
+  }
+}
+
+fn json_skip_number_digits(bytes: BitArray, budget: Int) -> JsonResult {
+  use <- bool.lazy_guard(when: budget <= 0, return: fn() { Truncated })
+  case bytes {
+    <<>> -> Truncated
+    <<b, rest:bits>> if b >= 0x30 && b <= 0x39 ->
+      json_skip_number_digits(rest, budget - 1)
+    <<0x2E, rest:bits>> -> json_skip_number_digits(rest, budget - 1)
+    <<0x65, rest:bits>> -> json_skip_number_digits(rest, budget - 1)
+    <<0x45, rest:bits>> -> json_skip_number_digits(rest, budget - 1)
+    <<0x2B, rest:bits>> -> json_skip_number_digits(rest, budget - 1)
+    <<0x2D, rest:bits>> -> json_skip_number_digits(rest, budget - 1)
+    _ -> Valid(bytes, budget)
+  }
+}
+
+fn json_match_literal(bytes: BitArray, lit: BitArray, budget: Int) -> JsonResult {
+  case bytes, lit {
+    _, <<>> -> Valid(bytes, budget)
+    <<>>, _ -> Truncated
+    <<b, b_rest:bits>>, <<l, l_rest:bits>> -> {
+      use <- bool.guard(when: b != l, return: Invalid)
+      json_match_literal(b_rest, l_rest, budget - 1)
+    }
+    _, _ -> Invalid
   }
 }

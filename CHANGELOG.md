@@ -42,6 +42,13 @@
   last so it only fires when no other signature matched, since its
   2-byte magic is heuristic and false-positive prone. Brotli is
   intentionally excluded because the format has no fixed magic. (#24)
+- Detect additional audio/video formats: ASF / WMV / WMA
+  (`application/vnd.ms-asf`), Flash Video (`video/x-flv`), AAC ADTS and
+  AAC ADIF (both `audio/aac`), AMR (`audio/amr`), AMR-WB
+  (`audio/amr-wb`), and AC3 (`audio/ac3`). Differentiate Matroska
+  (`video/x-matroska`) from WebM (`video/webm`) by inspecting the EBML
+  DocType element within the first 256 bytes — a regression from the
+  previous behavior where any EBML magic was reported as WebM. (#25)
 
 ## [0.1.0] - 2026-04-26
 

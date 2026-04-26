@@ -304,7 +304,8 @@ pub fn detect_runtime_and_container_formats_test() {
   should_detect(<<0x7F, 0x45, 0x4C, 0x46>>, "application/x-elf")
   should_detect(<<"PAR1":utf8>>, "application/vnd.apache.parquet")
   should_detect(<<"OggS":utf8>>, "application/ogg")
-  should_detect(<<0x1A, 0x45, 0xDF, 0xA3>>, "video/webm")
+  // WebM/Matroska detection now requires the EBML DocType element, not just
+  // the EBML magic — see `detect_webm_test` and `detect_matroska_test`.
 }
 
 pub fn detect_audio_formats_test() {
@@ -892,4 +893,67 @@ pub fn detect_zlib_does_not_steal_png_test() {
 pub fn detect_compression_strict_returns_ok_for_lzip_test() {
   mimetype.detect_strict(<<"LZIP":utf8>>)
   |> should.equal(Ok("application/x-lzip"))
+}
+
+pub fn detect_aac_adts_test() {
+  // ADTS sync: 0xFF then 0xF0/F1/F8/F9.
+  should_detect(<<0xFF, 0xF1, 0x00, 0x00>>, "audio/aac")
+}
+
+pub fn detect_aac_adif_test() {
+  should_detect(<<"ADIF":utf8>>, "audio/aac")
+}
+
+pub fn detect_amr_test() {
+  should_detect(<<"#!AMR":utf8, 0x0A, 0x00, 0x00>>, "audio/amr")
+}
+
+pub fn detect_amr_wb_test() {
+  should_detect(<<"#!AMR-WB":utf8, 0x0A, 0x00, 0x00>>, "audio/amr-wb")
+}
+
+pub fn detect_ac3_test() {
+  should_detect(<<0x0B, 0x77, 0x00, 0x00>>, "audio/ac3")
+}
+
+pub fn detect_asf_test() {
+  should_detect(
+    <<
+      0x30, 0x26, 0xB2, 0x75, 0x8E, 0x66, 0xCF, 0x11, 0xA6, 0xD9, 0x00, 0xAA,
+      0x00, 0x62, 0xCE, 0x6C,
+    >>,
+    "application/vnd.ms-asf",
+  )
+}
+
+pub fn detect_flv_test() {
+  should_detect(<<"FLV":utf8, 0x01, 0x05>>, "video/x-flv")
+}
+
+pub fn detect_matroska_test() {
+  // EBML magic + DocType element (0x4282) + length 0x88 + "matroska".
+  let bytes = <<
+    0x1A, 0x45, 0xDF, 0xA3, 0x9F, 0x42, 0x86, 0x81, 0x01, 0x42, 0xF7, 0x81, 0x01,
+    0x42, 0x82, 0x88, "matroska":utf8,
+  >>
+  should_detect(bytes, "video/x-matroska")
+}
+
+pub fn detect_webm_test() {
+  // EBML magic + DocType element (0x4282) + length 0x84 + "webm".
+  let bytes = <<
+    0x1A, 0x45, 0xDF, 0xA3, 0x9F, 0x42, 0x86, 0x81, 0x01, 0x42, 0xF7, 0x81, 0x01,
+    0x42, 0x82, 0x84, "webm":utf8,
+  >>
+  should_detect(bytes, "video/webm")
+}
+
+pub fn detect_ebml_without_doctype_falls_back_test() {
+  // EBML magic alone (no matroska/webm DocType in budget) → falls back.
+  should_fall_back(<<0x1A, 0x45, 0xDF, 0xA3, 0x9F, 0x42, 0x86, 0x81, 0x01>>)
+}
+
+pub fn detect_av_strict_returns_ok_for_amr_test() {
+  mimetype.detect_strict(<<"#!AMR":utf8, 0x0A>>)
+  |> should.equal(Ok("audio/amr"))
 }

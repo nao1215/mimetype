@@ -155,13 +155,32 @@ const signatures = [
   Bytes("font/ttf", [#(0, <<0x00, 0x01, 0x00, 0x00>>)]),
   Bytes("audio/mpeg", [#(0, <<"ID3":utf8>>)]),
   Check("audio/mpeg", has_mp3_frame_sync),
+  Check("audio/aac", has_aac_adts_sync),
+  Bytes("audio/aac", [#(0, <<"ADIF":utf8>>)]),
   Bytes(
     "audio/flac",
     [#(0, <<0x66, 0x4C, 0x61, 0x43, 0x00, 0x00, 0x00, 0x22>>)],
   ),
   Bytes("audio/midi", [#(0, <<0x4D, 0x54, 0x68, 0x64>>)]),
+  Bytes("audio/amr", [#(0, <<"#!AMR":utf8, 0x0A>>)]),
+  Bytes("audio/amr-wb", [#(0, <<"#!AMR-WB":utf8, 0x0A>>)]),
+  Bytes("audio/ac3", [#(0, <<0x0B, 0x77>>)]),
   Bytes("application/ogg", [#(0, <<0x4F, 0x67, 0x67, 0x53>>)]),
-  Bytes("video/webm", [#(0, <<0x1A, 0x45, 0xDF, 0xA3>>)]),
+  Bytes(
+    "application/vnd.ms-asf",
+    [
+      #(
+        0,
+        <<
+          0x30, 0x26, 0xB2, 0x75, 0x8E, 0x66, 0xCF, 0x11, 0xA6, 0xD9, 0x00, 0xAA,
+          0x00, 0x62, 0xCE, 0x6C,
+        >>,
+      ),
+    ],
+  ),
+  Bytes("video/x-flv", [#(0, <<"FLV":utf8, 0x01>>)]),
+  Check("video/x-matroska", looks_like_matroska),
+  Check("video/webm", looks_like_webm),
   Check("application/zstd", has_zstd_frame),
   Bytes("application/x-tar", [#(257, <<"ustar":utf8>>)]),
   Bytes("image/avif", [#(4, <<"ftyp":utf8>>), #(8, <<"avif":utf8>>)]),
@@ -696,6 +715,53 @@ fn has_zlib_magic(bytes: BitArray) -> Bool {
     <<0x78, second:size(8), _:bits>>
       if second == 0x01 || second == 0x5E || second == 0x9C || second == 0xDA
     -> True
+    _ -> False
+  }
+}
+
+fn has_aac_adts_sync(bytes: BitArray) -> Bool {
+  // ADTS sync = 12 bits all 1, then ID (1 bit), Layer (2 bits, must be 00),
+  // protection_absent (1 bit). Valid second-byte values (high nibble 0xF
+  // plus low nibble where bits 5-4 = 00): 0xF0, 0xF1, 0xF8, 0xF9.
+  case bytes {
+    <<0xFF, second:size(8), _:bits>>
+      if second == 0xF0 || second == 0xF1 || second == 0xF8 || second == 0xF9
+    -> True
+    _ -> False
+  }
+}
+
+const matroska_doctype = <<0x42, 0x82, 0x88, "matroska":utf8>>
+
+const webm_doctype = <<0x42, 0x82, 0x84, "webm":utf8>>
+
+const ebml_search_budget = 256
+
+fn looks_like_matroska(bytes: BitArray) -> Bool {
+  case bytes {
+    <<0x1A, 0x45, 0xDF, 0xA3, _:bits>> ->
+      contains_literal(bytes, matroska_doctype, ebml_search_budget)
+    _ -> False
+  }
+}
+
+fn looks_like_webm(bytes: BitArray) -> Bool {
+  case bytes {
+    <<0x1A, 0x45, 0xDF, 0xA3, _:bits>> ->
+      contains_literal(bytes, webm_doctype, ebml_search_budget)
+    _ -> False
+  }
+}
+
+fn contains_literal(bytes: BitArray, literal: BitArray, budget: Int) -> Bool {
+  use <- bool.guard(when: budget <= 0, return: False)
+  use <- bool.lazy_guard(
+    when: starts_with_literal(bytes, literal),
+    return: fn() { True },
+  )
+  case bytes {
+    <<>> -> False
+    <<_, rest:bits>> -> contains_literal(rest, literal, budget - 1)
     _ -> False
   }
 }

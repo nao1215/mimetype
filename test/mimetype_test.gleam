@@ -489,8 +489,8 @@ pub fn detect_json_rejects_plain_text_test() {
   should_fall_back(<<"Hello world":utf8>>)
 }
 
-pub fn detect_json_rejects_html_test() {
-  should_fall_back(<<"<html>":utf8>>)
+pub fn detect_json_html_input_matches_html_test() {
+  should_detect(<<"<html>":utf8>>, "text/html")
 }
 
 pub fn detect_json_rejects_bare_number_test() {
@@ -548,4 +548,119 @@ pub fn detect_json_rejects_whitespace_only_test() {
 
 pub fn detect_json_truncated_after_whitespace_test() {
   should_detect(<<"{\"a\":   ":utf8>>, "application/json")
+}
+
+pub fn detect_html_doctype_test() {
+  should_detect(
+    <<"<!DOCTYPE html><html><body></body></html>":utf8>>,
+    "text/html",
+  )
+}
+
+pub fn detect_html_doctype_lowercase_test() {
+  should_detect(<<"<!doctype html>":utf8>>, "text/html")
+}
+
+pub fn detect_html_uppercase_tag_test() {
+  should_detect(<<"<HTML>":utf8>>, "text/html")
+}
+
+pub fn detect_html_with_leading_whitespace_test() {
+  should_detect(<<"   \n\t<html>":utf8>>, "text/html")
+}
+
+pub fn detect_html_with_utf8_bom_test() {
+  should_detect(<<0xEF, 0xBB, 0xBF, "<html>":utf8>>, "text/html")
+}
+
+pub fn detect_html_head_test() {
+  should_detect(<<"<head>":utf8>>, "text/html")
+}
+
+pub fn detect_html_body_test() {
+  should_detect(<<"<body>":utf8>>, "text/html")
+}
+
+pub fn detect_html_script_test() {
+  should_detect(<<"<script>":utf8>>, "text/html")
+}
+
+pub fn detect_html_div_test() {
+  should_detect(<<"<div class=\"x\">":utf8>>, "text/html")
+}
+
+pub fn detect_html_short_tag_a_test() {
+  should_detect(<<"<a href=\"/\">":utf8>>, "text/html")
+}
+
+pub fn detect_html_short_tag_p_test() {
+  should_detect(<<"<p>hello":utf8>>, "text/html")
+}
+
+pub fn detect_html_truncated_tag_test() {
+  should_detect(<<"<html":utf8>>, "text/html")
+}
+
+pub fn detect_html_rejects_unknown_tag_test() {
+  should_fall_back(<<"<not-a-known-tag>":utf8>>)
+}
+
+pub fn detect_html_rejects_space_after_lt_test() {
+  should_fall_back(<<"< html>":utf8>>)
+}
+
+pub fn detect_html_rejects_address_via_short_a_signature_test() {
+  should_fall_back(<<"<address>":utf8>>)
+}
+
+pub fn detect_html_rejects_pre_via_short_p_signature_test() {
+  should_fall_back(<<"<pre>":utf8>>)
+}
+
+pub fn detect_html_rejects_plain_text_test() {
+  should_fall_back(<<"Hello world":utf8>>)
+}
+
+pub fn detect_xml_declaration_test() {
+  should_detect(<<"<?xml version=\"1.0\"?><root/>":utf8>>, "text/xml")
+}
+
+pub fn detect_xml_with_encoding_test() {
+  should_detect(
+    <<"<?xml version=\"1.0\" encoding=\"UTF-8\"?>":utf8>>,
+    "text/xml",
+  )
+}
+
+pub fn detect_xml_with_leading_whitespace_test() {
+  should_detect(<<"  \n<?xml ?>":utf8>>, "text/xml")
+}
+
+pub fn detect_xml_with_utf8_bom_test() {
+  should_detect(
+    <<0xEF, 0xBB, 0xBF, "<?xml version=\"1.0\"?>":utf8>>,
+    "text/xml",
+  )
+}
+
+pub fn detect_xml_truncated_test() {
+  should_detect(<<"<?xml ":utf8>>, "text/xml")
+}
+
+pub fn detect_xml_rejects_uppercase_declaration_test() {
+  should_fall_back(<<"<?XML version=\"1.0\"?>":utf8>>)
+}
+
+pub fn detect_xml_rejects_processing_instruction_other_than_xml_test() {
+  should_fall_back(<<"<?php ?>":utf8>>)
+}
+
+pub fn detect_xml_strict_returns_ok_test() {
+  mimetype.detect_strict(<<"<?xml version=\"1.0\"?>":utf8>>)
+  |> should.equal(Ok("text/xml"))
+}
+
+pub fn detect_html_strict_returns_ok_test() {
+  mimetype.detect_strict(<<"<!DOCTYPE html>":utf8>>)
+  |> should.equal(Ok("text/html"))
 }

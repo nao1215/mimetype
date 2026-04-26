@@ -109,6 +109,8 @@ const signatures = [
   Bytes("video/mp4", [#(4, <<"ftyp":utf8>>), #(8, <<"mp42":utf8>>)]),
   Bytes("video/mp4", [#(4, <<"ftyp":utf8>>), #(8, <<"avc1":utf8>>)]),
   Check("application/json", looks_like_json),
+  Check("text/html", looks_like_html),
+  Check("text/xml", looks_like_xml),
 ]
 
 /// Try to recognize a MIME type from a leading byte signature.
@@ -383,4 +385,136 @@ fn json_match_literal(bytes: BitArray, lit: BitArray, budget: Int) -> JsonResult
     }
     _, _ -> Invalid
   }
+}
+
+// HTML / XML sniffing per the WHATWG MIME Sniffing standard.
+//
+// `looks_like_html` recognizes inputs whose first non-whitespace token is
+// `<!doctype html` or one of a small set of common HTML tags, matched
+// case-insensitively and required to be followed by a tag-terminating byte
+// (whitespace, `>`, or end of input). The terminator requirement avoids
+// over-matching: `<address>` does not match the `<a` signature because
+// `d` is not a terminator.
+//
+// `looks_like_xml` recognizes inputs starting with the lowercase XML
+// declaration `<?xml` followed by a tag-terminating byte. The XML
+// declaration is case-sensitive per the XML 1.0 spec; uppercase variants
+// are not treated as XML.
+//
+// Both detectors strip an optional UTF-8 BOM and any leading HTML
+// whitespace before matching. UTF-16 / UTF-32 BOMs are deferred to the
+// dedicated text-plain detector (#20).
+
+const html_tag_signatures = [
+  <<"<html":utf8>>,
+  <<"<head":utf8>>,
+  <<"<body":utf8>>,
+  <<"<script":utf8>>,
+  <<"<iframe":utf8>>,
+  <<"<table":utf8>>,
+  <<"<style":utf8>>,
+  <<"<title":utf8>>,
+  <<"<br":utf8>>,
+  <<"<p":utf8>>,
+  <<"<h1":utf8>>,
+  <<"<div":utf8>>,
+  <<"<font":utf8>>,
+  <<"<img":utf8>>,
+  <<"<a":utf8>>,
+]
+
+fn looks_like_html(bytes: BitArray) -> Bool {
+  let trimmed = trim_text_prefix(bytes)
+  use <- bool.lazy_guard(when: matches_html_doctype(trimmed), return: fn() {
+    True
+  })
+  list.any(html_tag_signatures, fn(tag) { matches_html_tag(trimmed, tag) })
+}
+
+fn looks_like_xml(bytes: BitArray) -> Bool {
+  trim_text_prefix(bytes)
+  |> match_byte_prefix(<<"<?xml":utf8>>)
+  |> result.map(is_text_terminator)
+  |> result.unwrap(False)
+}
+
+fn matches_html_doctype(bytes: BitArray) -> Bool {
+  match_ci_prefix(bytes, <<"<!doctype html":utf8>>)
+  |> result.map(is_text_terminator)
+  |> result.unwrap(False)
+}
+
+fn matches_html_tag(bytes: BitArray, tag: BitArray) -> Bool {
+  match_ci_prefix(bytes, tag)
+  |> result.map(is_text_terminator)
+  |> result.unwrap(False)
+}
+
+fn trim_text_prefix(bytes: BitArray) -> BitArray {
+  bytes
+  |> strip_utf8_bom
+  |> skip_html_ws
+}
+
+fn strip_utf8_bom(bytes: BitArray) -> BitArray {
+  case bytes {
+    <<0xEF, 0xBB, 0xBF, rest:bits>> -> rest
+    _ -> bytes
+  }
+}
+
+fn skip_html_ws(bytes: BitArray) -> BitArray {
+  case bytes {
+    <<0x20, rest:bits>> -> skip_html_ws(rest)
+    <<0x09, rest:bits>> -> skip_html_ws(rest)
+    <<0x0A, rest:bits>> -> skip_html_ws(rest)
+    <<0x0C, rest:bits>> -> skip_html_ws(rest)
+    <<0x0D, rest:bits>> -> skip_html_ws(rest)
+    _ -> bytes
+  }
+}
+
+fn is_text_terminator(bytes: BitArray) -> Bool {
+  case bytes {
+    <<>> -> True
+    <<0x20, _:bits>> -> True
+    <<0x09, _:bits>> -> True
+    <<0x0A, _:bits>> -> True
+    <<0x0C, _:bits>> -> True
+    <<0x0D, _:bits>> -> True
+    <<0x3E, _:bits>> -> True
+    _ -> False
+  }
+}
+
+fn match_ci_prefix(bytes: BitArray, prefix: BitArray) -> Result(BitArray, Nil) {
+  case prefix, bytes {
+    <<>>, _ -> Ok(bytes)
+    _, <<>> -> Error(Nil)
+    <<p, p_rest:bits>>, <<b, b_rest:bits>> -> {
+      use <- bool.lazy_guard(
+        when: ascii_to_lower(b) != ascii_to_lower(p),
+        return: fn() { Error(Nil) },
+      )
+      match_ci_prefix(b_rest, p_rest)
+    }
+    _, _ -> Error(Nil)
+  }
+}
+
+fn match_byte_prefix(bytes: BitArray, prefix: BitArray) -> Result(BitArray, Nil) {
+  case prefix, bytes {
+    <<>>, _ -> Ok(bytes)
+    _, <<>> -> Error(Nil)
+    <<p, p_rest:bits>>, <<b, b_rest:bits>> -> {
+      use <- bool.lazy_guard(when: b != p, return: fn() { Error(Nil) })
+      match_byte_prefix(b_rest, p_rest)
+    }
+    _, _ -> Error(Nil)
+  }
+}
+
+fn ascii_to_lower(byte: Int) -> Int {
+  use <- bool.guard(when: byte < 0x41 || byte > 0x5A, return: byte)
+  byte + 32
 }

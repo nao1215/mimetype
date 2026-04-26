@@ -1233,3 +1233,96 @@ pub fn ancestors_empty_input_returns_empty_test() {
   mimetype.ancestors("")
   |> should.equal([])
 }
+
+pub fn charset_of_html_meta_charset_test() {
+  mimetype.charset_of(<<
+    "<html><head><meta charset=\"utf-8\"></head></html>":utf8,
+  >>)
+  |> should.equal(Ok("utf-8"))
+}
+
+pub fn charset_of_html_meta_charset_uppercase_test() {
+  mimetype.charset_of(<<
+    "<html><head><meta charset=\"Shift_JIS\"></head></html>":utf8,
+  >>)
+  |> should.equal(Ok("shift_jis"))
+}
+
+pub fn charset_of_html_http_equiv_content_charset_test() {
+  mimetype.charset_of(<<
+    "<html><head><meta http-equiv=\"Content-Type\" content=\"text/html; charset=Shift_JIS\"></head></html>":utf8,
+  >>)
+  |> should.equal(Ok("shift_jis"))
+}
+
+pub fn charset_of_xml_encoding_test() {
+  mimetype.charset_of(<<
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?><root/>":utf8,
+  >>)
+  |> should.equal(Ok("utf-8"))
+}
+
+pub fn charset_of_utf8_bom_wins_over_meta_test() {
+  mimetype.charset_of(<<
+    0xEF, 0xBB, 0xBF, "<html><meta charset=\"latin1\"></html>":utf8,
+  >>)
+  |> should.equal(Ok("utf-8"))
+}
+
+pub fn charset_of_pure_ascii_test() {
+  mimetype.charset_of(<<"Hello world\n":utf8>>)
+  |> should.equal(Ok("us-ascii"))
+}
+
+pub fn charset_of_valid_utf8_multibyte_test() {
+  mimetype.charset_of(<<"こんにちは":utf8>>)
+  |> should.equal(Ok("utf-8"))
+}
+
+pub fn charset_of_html_with_utf8_body_no_meta_test() {
+  mimetype.charset_of(<<"<html><body>こんにちは</body></html>":utf8>>)
+  |> should.equal(Ok("utf-8"))
+}
+
+pub fn charset_of_invalid_utf8_returns_error_test() {
+  // 0xC0 0x20 — invalid UTF-8 (0xC0 is an over-long encoding lead byte that
+  // cannot be followed by 0x20 in valid UTF-8).
+  mimetype.charset_of(<<0x48, 0x69, 0xC0, 0x20>>)
+  |> should.equal(Error(Nil))
+}
+
+pub fn charset_of_truncated_meta_does_not_false_positive_test() {
+  // <meta charset="u — incomplete attribute, no closing quote. Returns
+  // Error(Nil) because the quoted-value reader can't find the closing
+  // quote and the UTF-8 fallback also rejects the high-byte-free input.
+  // Actually all-ASCII input falls through to us-ascii.
+  mimetype.charset_of(<<"<meta charset=\"u":utf8>>)
+  |> should.equal(Ok("us-ascii"))
+}
+
+pub fn charset_of_utf16_le_bom_test() {
+  mimetype.charset_of(<<0xFF, 0xFE, 0x48, 0x00, 0x69, 0x00>>)
+  |> should.equal(Ok("utf-16le"))
+}
+
+pub fn charset_of_utf16_be_bom_test() {
+  mimetype.charset_of(<<0xFE, 0xFF, 0x00, 0x48, 0x00, 0x69>>)
+  |> should.equal(Ok("utf-16be"))
+}
+
+pub fn charset_of_utf32_le_bom_test() {
+  mimetype.charset_of(<<0xFF, 0xFE, 0x00, 0x00, 0x48, 0x00, 0x00, 0x00>>)
+  |> should.equal(Ok("utf-32le"))
+}
+
+pub fn charset_of_utf32_be_bom_test() {
+  mimetype.charset_of(<<0x00, 0x00, 0xFE, 0xFF, 0x00, 0x00, 0x00, 0x48>>)
+  |> should.equal(Ok("utf-32be"))
+}
+
+pub fn charset_of_empty_returns_pure_ascii_test() {
+  // Empty bytes → PureAscii (no multi-byte seen). Caller can treat this
+  // as "no content" if they prefer.
+  mimetype.charset_of(<<>>)
+  |> should.equal(Ok("us-ascii"))
+}

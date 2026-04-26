@@ -12,6 +12,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
+import mimetype/internal/charset as charset_internal
 import mimetype/internal/db
 import mimetype/internal/hierarchy
 import mimetype/internal/magic
@@ -148,6 +149,27 @@ pub fn is_zip_based(mime: String) -> Bool {
 /// `image/svg+xml` and any other `*+xml` types added to the hierarchy.
 pub fn is_xml_based(mime: String) -> Bool {
   is_a(mime, "text/xml") || is_a(mime, "application/xml")
+}
+
+/// Detect the character encoding (charset) of a `BitArray`.
+///
+/// Returns `Ok(charset)` when one of the following signals fires
+/// (in priority order):
+///
+///   1. A Unicode BOM (UTF-8 / UTF-16 LE/BE / UTF-32 LE/BE).
+///   2. An XML prolog `<?xml ... encoding="..." ?>`.
+///   3. An HTML `<meta charset="...">` (or `<meta http-equiv=... content=...>`)
+///      tag in the first 1 KB.
+///   4. A UTF-8 validity scan: `utf-8` for input that contains valid
+///      multi-byte UTF-8 sequences, `us-ascii` for input that is
+///      entirely 0x00–0x7F.
+///
+/// Returns `Error(Nil)` for inputs whose encoding cannot be determined
+/// (typically non-UTF-8 high-byte content like Latin-1 or Shift_JIS
+/// without an in-document declaration). Charset names are returned in
+/// lowercase, matching the convention used by IANA's charset registry.
+pub fn charset_of(bytes: BitArray) -> Result(String, Nil) {
+  charset_internal.detect(bytes)
 }
 
 /// Return the chain of ancestors of `mime`, ordered from immediate

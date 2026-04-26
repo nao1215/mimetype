@@ -49,6 +49,14 @@
   (`video/x-matroska`) from WebM (`video/webm`) by inspecting the EBML
   DocType element within the first 256 bytes — a regression from the
   previous behavior where any EBML magic was reported as WebM. (#25)
+- Add `charset_of(bytes) -> Result(String, Nil)` for character encoding
+  detection of text payloads. Composes four signals in priority order:
+  Unicode BOM, XML prolog `encoding="..."`, HTML
+  `<meta charset="...">` (or `<meta http-equiv> content="; charset=..."`),
+  and a UTF-8 validity scan. Returns `utf-8`, `us-ascii`, `utf-16le`,
+  `utf-16be`, `utf-32le`, `utf-32be`, or whatever charset the in-document
+  declaration specifies (e.g. `shift_jis`, `iso-8859-1`). Returns
+  `Error(Nil)` for non-UTF-8 high-byte content with no declaration. (#29)
 - Add a static MIME-type subtype tree and matching public predicates:
   `is_a(mime, parent)` (reflexive + transitive), `is_zip_based`,
   `is_xml_based`, and `ancestors`. Initial parent map covers OOXML

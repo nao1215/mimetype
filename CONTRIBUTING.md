@@ -50,19 +50,29 @@ You can also run individual steps:
 
 ## Regenerating the extension database
 
-`src/mimetype/internal/db.gleam` is generated from
-`doc/reference/upstream/mime-db/db.json`.
+The MIME-DB lookup tables live in three generated files, all derived
+from `doc/reference/upstream/mime-db/db.json`:
 
-Regenerate it with:
+- `src/mimetype/internal/db.gleam` — thin Gleam wrapper exposing the
+  lookup functions via `@external`
+- `src/mimetype/internal/mimetype_db_ffi.erl` — Erlang map-based table
+- `src/mimetype/internal/db_ffi.mjs` — JavaScript `Map`-based table
+
+Regenerate all three with:
 
 ```console
 just generate-db
 ```
 
+The script also build-checks the regenerated files inside a temporary
+project on both Erlang and JavaScript targets before installing them.
+CI re-runs the same script against the upstream commit pinned in the
+`db.gleam` header and fails on any drift.
+
 When changing the generation logic or updating the upstream data:
 
-1. Regenerate `src/mimetype/internal/db.gleam`
-2. Keep the upstream MIT notice in the generated header intact
+1. Run `just generate-db` and commit all three regenerated files
+2. Keep the upstream MIT notice in the FFI files' headers intact
 3. Keep `THIRD_PARTY_NOTICES.md` aligned with the packaged third-party data
 4. Run `just ci`
 
@@ -71,7 +81,9 @@ When changing the generation logic or updating the upstream data:
 `mimetype` intentionally splits the problem into two layers:
 
 - `src/mimetype.gleam` exposes the public API
-- `src/mimetype/internal/db.gleam` contains generated extension and reverse lookup tables
+- `src/mimetype/internal/db.gleam` is the Gleam wrapper for the
+  generated extension and reverse lookup tables; the data itself lives
+  in the per-target FFI files `mimetype_db_ffi.erl` and `db_ffi.mjs`
 - `src/mimetype/internal/magic.gleam` contains pure-Gleam byte-signature detection
 
 The extension database provides broad coverage. Magic-number detection
@@ -121,6 +133,31 @@ a terse reference-oriented style. Treat violations as review blockers.
 - State constraints factually.
 - Keep examples runnable as written.
 - Document precedence rules clearly when metadata and content can disagree.
+
+## Release process
+
+Releases are cut from `main` and driven entirely by tag pushes. The
+`.github/workflows/release.yml` workflow runs the full check matrix,
+publishes to Hex, and creates a GitHub Release whose body is extracted
+from `CHANGELOG.md`.
+
+Steps for a new release `vX.Y.Z`:
+
+1. Confirm `main` is green on CI and the working tree is clean.
+2. Promote any items under `## Unreleased` in `CHANGELOG.md` into a
+   new `## [X.Y.Z] - YYYY-MM-DD` section directly below `## Unreleased`.
+3. Bump `version = "X.Y.Z"` in `gleam.toml`.
+4. Open a PR with the changelog and version bump, get it green and merged.
+5. After merge, fast-forward `main` and tag the merge commit:
+   ```console
+   git checkout main
+   git pull --ff-only origin main
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
+   ```
+6. The release workflow handles `gleam publish` and the GitHub Release.
+   Verify both completed at https://hex.pm/packages/mimetype and
+   https://github.com/nao1215/mimetype/releases.
 
 ## License
 

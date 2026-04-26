@@ -83,6 +83,15 @@ const signatures = [
     ],
   ),
   Bytes("application/vnd.apache.parquet", [#(0, <<0x50, 0x41, 0x52, 0x31>>)]),
+  Bytes("font/otf", [#(0, <<"OTTO":utf8>>)]),
+  Bytes("font/collection", [#(0, <<"ttcf":utf8>>)]),
+  Bytes("font/woff", [#(0, <<"wOFF":utf8>>)]),
+  Bytes("font/woff2", [#(0, <<"wOF2":utf8>>)]),
+  Bytes(
+    "application/vnd.ms-fontobject",
+    [#(8, <<"LP":utf8>>), #(34, <<0x00, 0x00, 0x01>>)],
+  ),
+  Bytes("font/ttf", [#(0, <<0x00, 0x01, 0x00, 0x00>>)]),
   Bytes("audio/mpeg", [#(0, <<"ID3":utf8>>)]),
   Check("audio/mpeg", has_mp3_frame_sync),
   Bytes(

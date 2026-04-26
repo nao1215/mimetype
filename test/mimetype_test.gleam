@@ -837,3 +837,59 @@ pub fn detect_image_strict_returns_ok_for_psd_test() {
   mimetype.detect_strict(<<0x38, 0x42, 0x50, 0x53>>)
   |> should.equal(Ok("image/vnd.adobe.photoshop"))
 }
+
+pub fn detect_lz4_frame_test() {
+  should_detect(<<0x04, 0x22, 0x4D, 0x18>>, "application/x-lz4")
+}
+
+pub fn detect_lz4_legacy_test() {
+  should_detect(<<0x02, 0x21, 0x4C, 0x18>>, "application/x-lz4")
+}
+
+pub fn detect_lzip_test() {
+  should_detect(<<"LZIP":utf8>>, "application/x-lzip")
+}
+
+pub fn detect_snappy_framed_test() {
+  should_detect(
+    <<0xFF, 0x06, 0x00, 0x00, 0x73, 0x4E, 0x61, 0x50, 0x70, 0x59>>,
+    "application/x-snappy-framed",
+  )
+}
+
+pub fn detect_compress_test() {
+  should_detect(<<0x1F, 0x9D>>, "application/x-compress")
+}
+
+pub fn detect_ar_archive_test() {
+  should_detect(<<"!<arch>":utf8, 0x0A>>, "application/x-archive")
+}
+
+pub fn detect_lzh_method_5_test() {
+  // 2 bytes size, `-lh5-`, method byte 5, trailing `-`.
+  should_detect(<<0, 0, "-lh5-":utf8>>, "application/x-lzh-compressed")
+}
+
+pub fn detect_lzh_method_0_test() {
+  should_detect(<<0, 0, "-lh0-":utf8>>, "application/x-lzh-compressed")
+}
+
+pub fn detect_zlib_default_compression_test() {
+  // 0x78 0x9C is the most common zlib stream prefix (default compression).
+  should_detect(<<0x78, 0x9C, 0x00, 0x00>>, "application/x-deflate")
+}
+
+pub fn detect_zlib_best_compression_test() {
+  should_detect(<<0x78, 0xDA, 0x00, 0x00>>, "application/x-deflate")
+}
+
+pub fn detect_zlib_does_not_steal_png_test() {
+  // PNG bytes start with 0x89 PNG... — must NOT be detected as zlib even
+  // though PNG contains zlib internally. Verifies signature ordering.
+  should_detect(<<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>, "image/png")
+}
+
+pub fn detect_compression_strict_returns_ok_for_lzip_test() {
+  mimetype.detect_strict(<<"LZIP":utf8>>)
+  |> should.equal(Ok("application/x-lzip"))
+}

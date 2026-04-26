@@ -33,6 +33,15 @@
   (`image/vnd.radiance`), OpenEXR (`image/x-exr`), QOI (`image/x-qoi`),
   and FITS (`image/fits`). Targa (TGA) is intentionally excluded
   because its only reliable magic is at end-of-file. (#23)
+- Detect eight additional compression / archive formats: LZ4 frame and
+  legacy (`application/x-lz4`), lzip (`application/x-lzip`), Snappy
+  framed (`application/x-snappy-framed`), `.Z` compress
+  (`application/x-compress`), ar archive (`application/x-archive`),
+  LZH/LHA (`application/x-lzh-compressed`), and zlib raw streams
+  (`application/x-deflate`). The zlib detector is intentionally placed
+  last so it only fires when no other signature matched, since its
+  2-byte magic is heuristic and false-positive prone. Brotli is
+  intentionally excluded because the format has no fixed magic. (#24)
 
 ## [0.1.0] - 2026-04-26
 

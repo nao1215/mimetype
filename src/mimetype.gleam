@@ -13,6 +13,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import mimetype/internal/db
+import mimetype/internal/hierarchy
 import mimetype/internal/magic
 
 /// Fallback MIME type used when neither metadata nor byte signatures
@@ -104,6 +105,68 @@ pub fn is_audio(mime_type: String) -> Bool {
 /// Return `True` when the MIME type's top-level media type is `video`.
 pub fn is_video(mime_type: String) -> Bool {
   string.starts_with(essence(mime_type), "video/")
+}
+
+/// Return `True` when `mime` is `parent` or transitively inherits from
+/// `parent` in the static subtype tree.
+///
+/// The relation is reflexive (`is_a(x, x)` is always `True` for any
+/// non-empty `x`) and transitive (if `a` inherits from `b` and `b`
+/// inherits from `c`, then `is_a(a, c)` is `True`).
+///
+/// Both arguments are normalized via `essence` so parameters and case
+/// differences are ignored.
+pub fn is_a(mime: String, parent: String) -> Bool {
+  let mime_essence = essence(mime)
+  let parent_essence = essence(parent)
+  use <- bool.guard(when: mime_essence == "", return: False)
+  use <- bool.guard(when: parent_essence == "", return: False)
+  is_a_loop(mime_essence, parent_essence)
+}
+
+fn is_a_loop(mime: String, parent: String) -> Bool {
+  use <- bool.lazy_guard(when: mime == parent, return: fn() { True })
+  case hierarchy.parent_of(mime) {
+    Ok(next) -> is_a_loop(next, parent)
+    Error(Nil) -> False
+  }
+}
+
+/// Return `True` when `mime` is, or inherits from, `application/zip`.
+///
+/// Convenience wrapper for `is_a(mime, "application/zip")`. Returns
+/// `True` for `.docx` / `.xlsx` / `.epub` / `.apk` and other ZIP-based
+/// container formats.
+pub fn is_zip_based(mime: String) -> Bool {
+  is_a(mime, "application/zip")
+}
+
+/// Return `True` when `mime` is, or inherits from, an XML media type.
+///
+/// Both `text/xml` and `application/xml` are accepted as XML roots, in
+/// line with RFC 7303 which permits both. Returns `True` for
+/// `image/svg+xml` and any other `*+xml` types added to the hierarchy.
+pub fn is_xml_based(mime: String) -> Bool {
+  is_a(mime, "text/xml") || is_a(mime, "application/xml")
+}
+
+/// Return the chain of ancestors of `mime`, ordered from immediate
+/// parent to root.
+///
+/// Empty input or roots return `[]`. The returned list does not include
+/// `mime` itself; use `is_a(mime, mime)` (always `True`) if you need
+/// reflexive membership.
+pub fn ancestors(mime: String) -> List(String) {
+  let mime_essence = essence(mime)
+  use <- bool.guard(when: mime_essence == "", return: [])
+  ancestors_loop(mime_essence, [])
+}
+
+fn ancestors_loop(mime: String, acc: List(String)) -> List(String) {
+  case hierarchy.parent_of(mime) {
+    Ok(parent) -> ancestors_loop(parent, [parent, ..acc])
+    Error(Nil) -> list.reverse(acc)
+  }
 }
 
 /// Look up a parameter value from a MIME type string.

@@ -1126,3 +1126,110 @@ pub fn detect_with_limit_strict_returns_error_when_below_offset_test() {
   mimetype.detect_with_limit_strict(bytes, 100)
   |> should.equal(Error(Nil))
 }
+
+pub fn is_a_reflexive_test() {
+  mimetype.is_a("application/zip", "application/zip")
+  |> should.equal(True)
+}
+
+pub fn is_a_docx_inherits_from_zip_test() {
+  mimetype.is_a(
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/zip",
+  )
+  |> should.equal(True)
+}
+
+pub fn is_a_svg_inherits_from_xml_test() {
+  mimetype.is_a("image/svg+xml", "text/xml")
+  |> should.equal(True)
+}
+
+pub fn is_a_unrelated_returns_false_test() {
+  mimetype.is_a("image/png", "application/zip")
+  |> should.equal(False)
+}
+
+pub fn is_a_normalizes_essence_test() {
+  // Parameters and case differences are stripped before comparison.
+  mimetype.is_a("APPLICATION/ZIP; charset=utf-8", "application/zip")
+  |> should.equal(True)
+}
+
+pub fn is_a_empty_returns_false_test() {
+  mimetype.is_a("", "application/zip")
+  |> should.equal(False)
+  mimetype.is_a("application/zip", "")
+  |> should.equal(False)
+}
+
+pub fn is_zip_based_apk_test() {
+  mimetype.is_zip_based("application/vnd.android.package-archive")
+  |> should.equal(True)
+}
+
+pub fn is_zip_based_jar_test() {
+  mimetype.is_zip_based("application/java-archive")
+  |> should.equal(True)
+}
+
+pub fn is_zip_based_epub_test() {
+  mimetype.is_zip_based("application/epub+zip")
+  |> should.equal(True)
+}
+
+pub fn is_zip_based_zip_itself_test() {
+  mimetype.is_zip_based("application/zip")
+  |> should.equal(True)
+}
+
+pub fn is_zip_based_png_test() {
+  mimetype.is_zip_based("image/png")
+  |> should.equal(False)
+}
+
+pub fn is_xml_based_svg_test() {
+  mimetype.is_xml_based("image/svg+xml")
+  |> should.equal(True)
+}
+
+pub fn is_xml_based_text_xml_test() {
+  mimetype.is_xml_based("text/xml")
+  |> should.equal(True)
+}
+
+pub fn is_xml_based_application_xml_test() {
+  mimetype.is_xml_based("application/xml")
+  |> should.equal(True)
+}
+
+pub fn is_xml_based_html_test() {
+  // HTML is sniffable but is not XML; it is not a child of text/xml.
+  mimetype.is_xml_based("text/html")
+  |> should.equal(False)
+}
+
+pub fn ancestors_epub_test() {
+  mimetype.ancestors("application/epub+zip")
+  |> should.equal(["application/zip"])
+}
+
+pub fn ancestors_root_returns_empty_test() {
+  mimetype.ancestors("application/octet-stream")
+  |> should.equal([])
+}
+
+pub fn ancestors_unknown_mime_returns_empty_test() {
+  mimetype.ancestors("application/x-not-real")
+  |> should.equal([])
+}
+
+pub fn ancestors_msword_inherits_from_ole_test() {
+  mimetype.ancestors("application/msword")
+  |> should.equal(["application/x-ole-storage"])
+}
+
+pub fn ancestors_empty_input_returns_empty_test() {
+  mimetype.ancestors("")
+  |> should.equal([])
+}

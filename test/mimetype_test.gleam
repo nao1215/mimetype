@@ -730,3 +730,60 @@ pub fn detect_svg_strict_returns_ok_test() {
   mimetype.detect_strict(<<"<svg/>":utf8>>)
   |> should.equal(Ok("image/svg+xml"))
 }
+
+pub fn detect_ttf_test() {
+  should_detect(<<0x00, 0x01, 0x00, 0x00>>, "font/ttf")
+}
+
+pub fn detect_otf_test() {
+  should_detect(<<"OTTO":utf8>>, "font/otf")
+}
+
+pub fn detect_ttc_test() {
+  should_detect(<<"ttcf":utf8>>, "font/collection")
+}
+
+pub fn detect_woff_test() {
+  should_detect(<<"wOFF":utf8>>, "font/woff")
+}
+
+pub fn detect_woff2_test() {
+  should_detect(<<"wOF2":utf8>>, "font/woff2")
+}
+
+pub fn detect_eot_test() {
+  // EOT signature: "LP" at offset 8, "00 00 01" at offset 34.
+  let bytes = <<
+    0:size({ 8 * 8 }),
+    "LP":utf8,
+    0:size({ 24 * 8 }),
+    0x00,
+    0x00,
+    0x01,
+  >>
+  should_detect(bytes, "application/vnd.ms-fontobject")
+}
+
+pub fn detect_eot_strict_returns_ok_test() {
+  let bytes = <<
+    0:size({ 8 * 8 }),
+    "LP":utf8,
+    0:size({ 24 * 8 }),
+    0x00,
+    0x00,
+    0x01,
+  >>
+  mimetype.detect_strict(bytes)
+  |> should.equal(Ok("application/vnd.ms-fontobject"))
+}
+
+pub fn detect_eot_rejects_missing_offset_34_magic_test() {
+  // "LP" at offset 8 alone is not enough — must also have 00 00 01 at 34.
+  let bytes = <<0:size({ 8 * 8 }), "LP":utf8, 0:size({ 27 * 8 })>>
+  should_fall_back(bytes)
+}
+
+pub fn detect_font_strict_returns_ok_for_ttf_test() {
+  mimetype.detect_strict(<<0x00, 0x01, 0x00, 0x00>>)
+  |> should.equal(Ok("font/ttf"))
+}

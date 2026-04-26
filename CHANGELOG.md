@@ -22,6 +22,10 @@
   terminator (whitespace, `>`, `/`, or end of input). Takes priority over
   the generic `text/xml` signature so that SVG payloads with an XML
   prolog are reported as `image/svg+xml`. (#18)
+- Detect six font formats from leading-byte signatures: TrueType (`font/ttf`),
+  OpenType (`font/otf`), TrueType Collection (`font/collection`), WOFF
+  (`font/woff`), WOFF2 (`font/woff2`), and Embedded OpenType
+  (`application/vnd.ms-fontobject`). MIME types follow RFC 8081. (#22)
 
 ## [0.1.0] - 2026-04-26
 

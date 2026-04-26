@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Format / Lint / Type check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: extractions/setup-just@v3
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28"
+          gleam-version: "1.15.2"
+      - name: Download dependencies
+        run: just deps
+      - name: Format check
+        run: just format-check
+      - name: Type check
+        run: just typecheck
+      - name: Lint
+        run: just lint
+
+  build-and-test:
+    name: Build and test (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [erlang, javascript]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: extractions/setup-just@v3
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28"
+          gleam-version: "1.15.2"
+      - name: Set up Node.js
+        if: matrix.target == 'javascript'
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Download dependencies
+        run: just deps
+      - name: Build
+        run: just build-${{ matrix.target }}
+      - name: Test
+        run: just test-${{ matrix.target }}
+
+  mime-db-up-to-date:
+    name: Generated MIME-DB matches script output
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: extractions/setup-just@v3
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28"
+          gleam-version: "1.15.2"
+      - name: Determine pinned mime-db commit
+        id: pin
+        run: |
+          set -eu
+          COMMIT=$(sed -n 's|.*(\([0-9a-f][0-9a-f]*\))\..*|\1|p' \
+            src/mimetype/internal/db.gleam | head -1)
+          if [ -z "$COMMIT" ]; then
+            echo "could not extract pinned mime-db commit from db.gleam header" >&2
+            exit 1
+          fi
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+      - name: Clone mime-db at pinned commit
+        run: |
+          set -eu
+          mkdir -p doc/reference/upstream
+          git clone https://github.com/jshttp/mime-db.git \
+            doc/reference/upstream/mime-db
+          git -C doc/reference/upstream/mime-db checkout \
+            "${{ steps.pin.outputs.commit }}"
+      - name: Download dependencies
+        run: just deps
+      - name: Regenerate generated MIME-DB sources
+        run: just generate-db
+      - name: Verify generated files match committed copies
+        run: |
+          set -eu
+          git diff --exit-code -- \
+            src/mimetype/internal/db.gleam \
+            src/mimetype/internal/mimetype_db_ffi.erl \
+            src/mimetype/internal/db_ffi.mjs \
+            || {
+              echo "::error::Generated MIME-DB files are out of date." \
+                "Re-run 'just generate-db' and commit the result."
+              exit 1
+            }

@@ -15,6 +15,13 @@
 - Detect `text/xml` from leading bytes by recognizing the lowercase
   `<?xml` declaration followed by a tag-terminating byte. Both detectors
   strip an optional UTF-8 BOM and HTML whitespace before matching. (#17)
+- Detect `image/svg+xml` from the XML root element. The detector skips an
+  optional UTF-8 BOM, whitespace, an `<?xml ... ?>` prolog, an
+  `<!DOCTYPE ...>` declaration, and any number of `<!-- ... -->` comments
+  before checking for a case-sensitive `<svg` element followed by a tag
+  terminator (whitespace, `>`, `/`, or end of input). Takes priority over
+  the generic `text/xml` signature so that SVG payloads with an XML
+  prolog are reported as `image/svg+xml`. (#18)
 
 ## [0.1.0] - 2026-04-26
 

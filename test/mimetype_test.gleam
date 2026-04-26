@@ -664,3 +664,69 @@ pub fn detect_html_strict_returns_ok_test() {
   mimetype.detect_strict(<<"<!DOCTYPE html>":utf8>>)
   |> should.equal(Ok("text/html"))
 }
+
+pub fn detect_svg_root_with_xmlns_test() {
+  should_detect(
+    <<
+      "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"/>":utf8,
+    >>,
+    "image/svg+xml",
+  )
+}
+
+pub fn detect_svg_self_closing_test() {
+  should_detect(<<"<svg/>":utf8>>, "image/svg+xml")
+}
+
+pub fn detect_svg_after_xml_prolog_test() {
+  should_detect(<<"<?xml version=\"1.0\"?><svg></svg>":utf8>>, "image/svg+xml")
+}
+
+pub fn detect_svg_after_xml_prolog_and_doctype_test() {
+  should_detect(
+    <<
+      "<?xml version=\"1.0\"?>\n<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\" \"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd\">\n<svg>":utf8,
+    >>,
+    "image/svg+xml",
+  )
+}
+
+pub fn detect_svg_after_comment_test() {
+  should_detect(
+    <<"<?xml version=\"1.0\"?><!-- some comment --><svg/>":utf8>>,
+    "image/svg+xml",
+  )
+}
+
+pub fn detect_svg_with_utf8_bom_test() {
+  should_detect(<<0xEF, 0xBB, 0xBF, "<svg/>":utf8>>, "image/svg+xml")
+}
+
+pub fn detect_svg_with_leading_whitespace_test() {
+  should_detect(<<"   \n  <svg></svg>":utf8>>, "image/svg+xml")
+}
+
+pub fn detect_svg_truncated_root_test() {
+  should_detect(<<"<svg":utf8>>, "image/svg+xml")
+}
+
+pub fn detect_svg_rejects_uppercase_root_test() {
+  // <SVG> is not SVG (XML element names are case-sensitive). It also does
+  // not match any HTML signature, so it falls through to octet-stream.
+  should_fall_back(<<"<SVG>":utf8>>)
+}
+
+pub fn detect_svg_rejects_extended_name_test() {
+  // <svg-fake> must not match: after <svg, the next byte (-) is not a
+  // tag terminator.
+  should_fall_back(<<"<svg-fake>":utf8>>)
+}
+
+pub fn detect_svg_xml_prolog_without_svg_falls_back_to_xml_test() {
+  should_detect(<<"<?xml ?><html>":utf8>>, "text/xml")
+}
+
+pub fn detect_svg_strict_returns_ok_test() {
+  mimetype.detect_strict(<<"<svg/>":utf8>>)
+  |> should.equal(Ok("image/svg+xml"))
+}

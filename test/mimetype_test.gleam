@@ -613,6 +613,30 @@ pub fn detect_mp4_family_formats_test() {
   should_detect(<<0:size(32), "ftyp":utf8, "isom":utf8>>, "video/mp4")
 }
 
+pub fn detect_mp4_recognizes_extra_iso_bmff_brands_test() {
+  // Brands not previously enumerated are now classified as video/mp4 via the
+  // ftyp catch-all (issue #49). The brand bytes are arbitrary 4-byte tokens,
+  // so brands beyond the well-known set should also resolve to video/mp4.
+  should_detect(<<0:size(32), "ftyp":utf8, "M4V ":utf8>>, "video/mp4")
+  should_detect(<<0:size(32), "ftyp":utf8, "f4v ":utf8>>, "video/mp4")
+  should_detect(<<0:size(32), "ftyp":utf8, "MSNV":utf8>>, "video/mp4")
+  should_detect(<<0:size(32), "ftyp":utf8, "NDAS":utf8>>, "video/mp4")
+  should_detect(<<0:size(32), "ftyp":utf8, "dash":utf8>>, "video/mp4")
+  should_detect(<<0:size(32), "ftyp":utf8, "mp71":utf8>>, "video/mp4")
+  should_detect(<<0:size(32), "ftyp":utf8, "XYZQ":utf8>>, "video/mp4")
+}
+
+pub fn detect_mp4_specific_brands_take_precedence_over_catch_all_test() {
+  // The image/heic, audio/mp4 and video/quicktime brand mappings still win
+  // against the ftyp catch-all because the specific signatures are evaluated
+  // first.
+  should_detect(<<0:size(32), "ftyp":utf8, "heix":utf8>>, "image/heic")
+  should_detect(<<0:size(32), "ftyp":utf8, "hevc":utf8>>, "image/heic")
+  should_detect(<<0:size(32), "ftyp":utf8, "avis":utf8>>, "image/avif")
+  should_detect(<<0:size(32), "ftyp":utf8, "M4B ":utf8>>, "audio/mp4")
+  should_detect(<<0:size(32), "ftyp":utf8, "M4P ":utf8>>, "audio/mp4")
+}
+
 pub fn detect_near_miss_signatures_fall_back_to_default_test() {
   // ASCII near-miss falls through to text/plain after #20.
   should_detect(<<"GIF87b":utf8>>, "text/plain")

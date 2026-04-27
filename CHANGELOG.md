@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Fixed
+
+- Recognize MP4 files using ISO BMFF brands beyond the previously enumerated
+  set (`isom`, `iso2`, `mp41`, `mp42`, `avc1`). Any input with `ftyp` at offset
+  4 and a full 4-byte brand at offset 8 is now classified as `video/mp4`,
+  unless a more specific signature matches first (`avif`/`avis` → `image/avif`,
+  `heic`/`heix`/`hevc` → `image/heic`, `M4A `/`M4B `/`M4P ` → `audio/mp4`,
+  `qt  ` → `video/quicktime`). Brands such as `M4V `, `f4v `, `MSNV`, `NDAS`,
+  `dash`, and `mp71` are no longer reported as `application/octet-stream`.
+  (#49)
+
 ## [0.3.0] - 2026-04-27
 
 ### Added

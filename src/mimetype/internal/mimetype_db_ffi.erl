@@ -31,16 +31,39 @@
 -module(mimetype_db_ffi).
 -export([extension_to_mime_type/1, mime_type_to_extensions/1]).
 
+-define(EXTENSION_TO_MIME_KEY, {?MODULE, extension_to_mime_table}).
+-define(MIME_TO_EXTENSIONS_KEY, {?MODULE, mime_type_to_extensions_table}).
+
 extension_to_mime_type(Extension) ->
-    case maps:find(Extension, extension_to_mime_table()) of
+    case maps:find(Extension, get_extension_to_mime_table()) of
         {ok, MimeType} -> {ok, MimeType};
         error -> {error, nil}
     end.
 
 mime_type_to_extensions(MimeType) ->
-    case maps:find(MimeType, mime_type_to_extensions_table()) of
+    case maps:find(MimeType, get_mime_type_to_extensions_table()) of
         {ok, Extensions} -> {ok, Extensions};
         error -> {error, nil}
+    end.
+
+get_extension_to_mime_table() ->
+    case persistent_term:get(?EXTENSION_TO_MIME_KEY, undefined) of
+        undefined ->
+            Map = extension_to_mime_table(),
+            persistent_term:put(?EXTENSION_TO_MIME_KEY, Map),
+            Map;
+        Map ->
+            Map
+    end.
+
+get_mime_type_to_extensions_table() ->
+    case persistent_term:get(?MIME_TO_EXTENSIONS_KEY, undefined) of
+        undefined ->
+            Map = mime_type_to_extensions_table(),
+            persistent_term:put(?MIME_TO_EXTENSIONS_KEY, Map),
+            Map;
+        Map ->
+            Map
     end.
 
 extension_to_mime_table() ->

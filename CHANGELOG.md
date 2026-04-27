@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Changed
+
+- Cache the Erlang FFI MIME-DB lookup tables via `persistent_term`. The
+  previous implementation rebuilt the full ~900-entry `extension_to_mime_table`
+  and `mime_type_to_extensions_table` maps on every call to
+  `extension_to_mime_type/1` or `mime_type_to_extensions/1`, allocating fresh
+  maps per invocation and adding GC pressure on hot paths (e.g.
+  Content-Type detection per HTTP request). The tables are now built lazily on
+  first access and reused for the lifetime of the VM. The JavaScript target
+  was already module-level cached and is unchanged. (#48)
+
 ### Fixed
 
 - Recognize MP4 files using ISO BMFF brands beyond the previously enumerated

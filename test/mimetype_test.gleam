@@ -98,6 +98,34 @@ pub fn mime_type_to_extensions_ignores_parameters_test() {
   |> should.equal(["html", "htm", "shtml"])
 }
 
+pub fn extension_to_mime_type_repeated_lookups_are_consistent_test() {
+  // Regression for issue #48: the Erlang FFI now caches the lookup tables
+  // via persistent_term. Repeated lookups (mixing the same key, different
+  // keys, and unknown keys) must keep returning the same answers.
+  list.repeat(Nil, 200)
+  |> list.each(fn(_) {
+    mimetype.extension_to_mime_type(".json")
+    |> should.equal("application/json")
+    mimetype.extension_to_mime_type(".png")
+    |> should.equal("image/png")
+    mimetype.extension_to_mime_type("totally-unknown-ext")
+    |> should.equal("application/octet-stream")
+  })
+}
+
+pub fn mime_type_to_extensions_repeated_lookups_are_consistent_test() {
+  // Regression for issue #48: matching coverage on the reverse-lookup map.
+  list.repeat(Nil, 200)
+  |> list.each(fn(_) {
+    mimetype.mime_type_to_extensions("image/jpeg")
+    |> should.equal(["jpg", "jpeg", "jpe"])
+    mimetype.mime_type_to_extensions("application/json")
+    |> should.equal(["json", "map"])
+    mimetype.mime_type_to_extensions("application/x-not-real")
+    |> should.equal([])
+  })
+}
+
 pub fn essence_strips_parameters_and_normalizes_case_test() {
   mimetype.essence(" TEXT/HTML ; charset=UTF-8 ")
   |> should.equal("text/html")

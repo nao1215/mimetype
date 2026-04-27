@@ -9,6 +9,7 @@ import gleam/bool
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
 
 type Signature {
   Bytes(String, List(#(Int, BitArray)))
@@ -86,6 +87,21 @@ const signatures = [
     "application/pdf",
     [#(0, <<0xEF, 0xBB, 0xBF, 0x25, 0x50, 0x44, 0x46, 0x2D>>)],
   ),
+  Check("application/epub+zip", looks_like_epub),
+  Check(
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    looks_like_docx,
+  ),
+  Check(
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    looks_like_xlsx,
+  ),
+  Check(
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    looks_like_pptx,
+  ),
+  Check("application/java-archive", looks_like_jar),
+  Check("application/vnd.android.package-archive", looks_like_apk),
   Bytes("application/zip", [#(0, <<0x50, 0x4B, 0x03, 0x04>>)]),
   Bytes("application/zip", [#(0, <<0x50, 0x4B, 0x05, 0x06>>)]),
   Bytes("application/zip", [#(0, <<0x50, 0x4B, 0x07, 0x08>>)]),
@@ -783,6 +799,126 @@ fn looks_like_ole_powerpoint(bytes: BitArray) -> Bool {
 
 fn looks_like_ole_cfb(bytes: BitArray) -> Bool {
   has_ole_header(bytes)
+}
+
+// ZIP-based format detection.
+//
+// ZIP local file header layout:
+//   Offset 0:  signature  PK\x03\x04  (4 bytes)
+//   Offset 26: filename length         (2 bytes, little-endian)
+//   Offset 28: extra field length      (2 bytes, little-endian)
+//   Offset 30: filename                (variable)
+//
+// After filename + extra + compressed data comes the next local file header.
+// We walk a few entries to collect filenames and decide the format.
+
+const zip_local_header = <<0x50, 0x4B, 0x03, 0x04>>
+
+fn has_zip_header(bytes: BitArray) -> Bool {
+  has_bytes_at(bytes, 0, zip_local_header)
+}
+
+/// Extract filenames from ZIP local file headers (up to budget entries).
+fn zip_collect_filenames(
+  bytes: BitArray,
+  offset: Int,
+  budget: Int,
+  acc: List(String),
+) -> List(String) {
+  use <- bool.guard(
+    when: budget <= 0 || offset + 30 > bit_array.byte_size(bytes),
+    return: acc,
+  )
+  use <- bool.guard(
+    when: !has_bytes_at(bytes, offset, zip_local_header),
+    return: acc,
+  )
+  case zip_read_entry_info(bytes, offset) {
+    Error(Nil) -> acc
+    Ok(#(filename, next_offset)) ->
+      zip_collect_filenames(bytes, next_offset, budget - 1, [filename, ..acc])
+  }
+}
+
+fn zip_read_entry_info(
+  bytes: BitArray,
+  offset: Int,
+) -> Result(#(String, Int), Nil) {
+  let size = bit_array.byte_size(bytes)
+  use <- bool.guard(when: offset + 30 > size, return: Error(Nil))
+  use comp_size_bits <- result.try(bit_array.slice(bytes, offset + 18, 4))
+  use fname_len_bits <- result.try(bit_array.slice(bytes, offset + 26, 2))
+  use extra_len_bits <- result.try(bit_array.slice(bytes, offset + 28, 2))
+  let compressed_size = le_u32(comp_size_bits)
+  let fname_len = le_u16(fname_len_bits)
+  let extra_len = le_u16(extra_len_bits)
+  use <- bool.guard(
+    when: fname_len <= 0 || offset + 30 + fname_len > size,
+    return: Error(Nil),
+  )
+  use fname_bytes <- result.try(bit_array.slice(bytes, offset + 30, fname_len))
+  let filename = bit_array.to_string(fname_bytes) |> result.unwrap("")
+  let next = offset + 30 + fname_len + extra_len + compressed_size
+  Ok(#(filename, next))
+}
+
+fn le_u16(bytes: BitArray) -> Int {
+  case bytes {
+    <<lo, hi>> -> hi * 256 + lo
+    _ -> 0
+  }
+}
+
+fn le_u32(bytes: BitArray) -> Int {
+  case bytes {
+    <<b0, b1, b2, b3>> -> b3 * 16_777_216 + b2 * 65_536 + b1 * 256 + b0
+    _ -> 0
+  }
+}
+
+fn zip_filenames_contain(filenames: List(String), prefix: String) -> Bool {
+  list.any(filenames, fn(name) { string.starts_with(name, prefix) })
+}
+
+fn looks_like_epub(bytes: BitArray) -> Bool {
+  // EPUB requires "mimetype" as the first entry, stored uncompressed at
+  // offset 30, with content "application/epub+zip".
+  use <- bool.guard(when: !has_zip_header(bytes), return: False)
+  has_bytes_at(bytes, 30, <<"mimetype":utf8>>)
+  && has_bytes_at(bytes, 38, <<"application/epub+zip":utf8>>)
+}
+
+fn looks_like_jar(bytes: BitArray) -> Bool {
+  use <- bool.guard(when: !has_zip_header(bytes), return: False)
+  let filenames = zip_collect_filenames(bytes, 0, 20, [])
+  zip_filenames_contain(filenames, "META-INF/MANIFEST.MF")
+}
+
+fn looks_like_apk(bytes: BitArray) -> Bool {
+  use <- bool.guard(when: !has_zip_header(bytes), return: False)
+  let filenames = zip_collect_filenames(bytes, 0, 20, [])
+  zip_filenames_contain(filenames, "AndroidManifest.xml")
+}
+
+fn looks_like_docx(bytes: BitArray) -> Bool {
+  use <- bool.guard(when: !has_zip_header(bytes), return: False)
+  let filenames = zip_collect_filenames(bytes, 0, 20, [])
+  zip_filenames_contain(filenames, "[Content_Types].xml")
+  && zip_filenames_contain(filenames, "word/")
+}
+
+fn looks_like_xlsx(bytes: BitArray) -> Bool {
+  use <- bool.guard(when: !has_zip_header(bytes), return: False)
+  let filenames = zip_collect_filenames(bytes, 0, 20, [])
+  zip_filenames_contain(filenames, "[Content_Types].xml")
+  && zip_filenames_contain(filenames, "xl/")
+}
+
+fn looks_like_pptx(bytes: BitArray) -> Bool {
+  use <- bool.guard(when: !has_zip_header(bytes), return: False)
+  let filenames = zip_collect_filenames(bytes, 0, 20, [])
+  zip_filenames_contain(filenames, "[Content_Types].xml")
+  && zip_filenames_contain(filenames, "ppt/")
 }
 
 fn has_zlib_magic(bytes: BitArray) -> Bool {

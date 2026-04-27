@@ -212,11 +212,7 @@ const signatures = [
   Bytes("audio/mp4", [#(4, <<"ftyp":utf8>>), #(8, <<"M4B ":utf8>>)]),
   Bytes("audio/mp4", [#(4, <<"ftyp":utf8>>), #(8, <<"M4P ":utf8>>)]),
   Bytes("video/quicktime", [#(4, <<"ftyp":utf8>>), #(8, <<"qt  ":utf8>>)]),
-  Bytes("video/mp4", [#(4, <<"ftyp":utf8>>), #(8, <<"isom":utf8>>)]),
-  Bytes("video/mp4", [#(4, <<"ftyp":utf8>>), #(8, <<"iso2":utf8>>)]),
-  Bytes("video/mp4", [#(4, <<"ftyp":utf8>>), #(8, <<"mp41":utf8>>)]),
-  Bytes("video/mp4", [#(4, <<"ftyp":utf8>>), #(8, <<"mp42":utf8>>)]),
-  Bytes("video/mp4", [#(4, <<"ftyp":utf8>>), #(8, <<"avc1":utf8>>)]),
+  Check("video/mp4", looks_like_iso_bmff_video),
   Check("application/json", looks_like_json),
   Check("text/html", looks_like_html),
   Check("image/svg+xml", looks_like_svg),
@@ -289,6 +285,18 @@ fn has_zstd_frame(bytes: BitArray) -> Bool {
     -> True
     _ -> False
   }
+}
+
+// ISO Base Media File Format catch-all for `video/mp4`.
+//
+// Reached only after the specific ftyp brand signatures (avif/avis, heic/heix/
+// hevc, M4A/M4B/M4P, qt) have been tried and missed. Any remaining file with
+// `ftyp` at offset 4 and a full 4-byte brand at offset 8 is treated as
+// `video/mp4` rather than rejected, so brands like `M4V `, `f4v `, `MSNV`,
+// `NDAS`, `dash`, `mp71`, etc. are no longer reported as
+// `application/octet-stream`.
+fn looks_like_iso_bmff_video(bytes: BitArray) -> Bool {
+  has_bytes_at(bytes, 4, <<"ftyp":utf8>>) && bit_array.byte_size(bytes) >= 12
 }
 
 fn has_bytes_at(bytes: BitArray, offset: Int, prefix: BitArray) -> Bool {

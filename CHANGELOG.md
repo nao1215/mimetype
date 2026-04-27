@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.4.0] - 2026-04-27
+
 ### Changed
 
 - Cache the Erlang FFI MIME-DB lookup tables via `persistent_term`. The

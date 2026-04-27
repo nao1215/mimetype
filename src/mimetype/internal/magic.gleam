@@ -115,6 +115,10 @@ const signatures = [
     [#(0, <<0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x00>>)],
   ),
   Bytes("application/vnd.ms-cab-compressed", [#(0, <<0x4D, 0x53, 0x43, 0x46>>)]),
+  Check("application/msword", looks_like_ole_word),
+  Check("application/vnd.ms-excel", looks_like_ole_excel),
+  Check("application/vnd.ms-powerpoint", looks_like_ole_powerpoint),
+  Check("application/x-ole-storage", looks_like_ole_cfb),
   Bytes("application/wasm", [#(0, <<0x00, 0x61, 0x73, 0x6D>>)]),
   Bytes("application/x-elf", [#(0, <<0x7F, 0x45, 0x4C, 0x46>>)]),
   Bytes(
@@ -708,6 +712,77 @@ fn has_lzh_magic(bytes: BitArray) -> Bool {
   // method digit, and 6 is the trailing `-`. We match the fixed parts and
   // accept any byte at position 5.
   has_bytes_at(bytes, 2, <<"-lh":utf8>>) && has_bytes_at(bytes, 6, <<"-":utf8>>)
+}
+
+// OLE Compound File Binary (CFB) detection.
+//
+// The CFB header is 8 bytes: D0 CF 11 E0 A1 B1 1A E1.
+// To distinguish Word/Excel/PowerPoint we scan for UTF-16LE encoded
+// stream names in the leading bytes (typically within the first 2 KB).
+
+const ole_cfb_header = <<0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1>>
+
+// "WordDocument" in UTF-16LE
+const ole_word_marker = <<
+  0x57, 0x00, 0x6F, 0x00, 0x72, 0x00, 0x64, 0x00, 0x44, 0x00, 0x6F, 0x00, 0x63,
+  0x00, 0x75, 0x00, 0x6D, 0x00, 0x65, 0x00, 0x6E, 0x00, 0x74, 0x00,
+>>
+
+// "Workbook" in UTF-16LE
+const ole_workbook_marker = <<
+  0x57, 0x00, 0x6F, 0x00, 0x72, 0x00, 0x6B, 0x00, 0x62, 0x00, 0x6F, 0x00, 0x6F,
+  0x00, 0x6B, 0x00,
+>>
+
+// "Book" in UTF-16LE (older Excel format)
+const ole_book_marker = <<0x42, 0x00, 0x6F, 0x00, 0x6F, 0x00, 0x6B, 0x00>>
+
+// "PowerPoint Document" in UTF-16LE
+const ole_powerpoint_marker = <<
+  0x50, 0x00, 0x6F, 0x00, 0x77, 0x00, 0x65, 0x00, 0x72, 0x00, 0x50, 0x00, 0x6F,
+  0x00, 0x69, 0x00, 0x6E, 0x00, 0x74, 0x00, 0x20, 0x00, 0x44, 0x00, 0x6F, 0x00,
+  0x63, 0x00, 0x75, 0x00, 0x6D, 0x00, 0x65, 0x00, 0x6E, 0x00, 0x74, 0x00,
+>>
+
+fn has_ole_header(bytes: BitArray) -> Bool {
+  has_bytes_at(bytes, 0, ole_cfb_header)
+}
+
+fn ole_contains_marker(bytes: BitArray, marker: BitArray) -> Bool {
+  ole_scan_for_marker(bytes, marker, 0)
+}
+
+fn ole_scan_for_marker(bytes: BitArray, marker: BitArray, offset: Int) -> Bool {
+  let marker_size = bit_array.byte_size(marker)
+  let bytes_size = bit_array.byte_size(bytes)
+  case offset + marker_size > bytes_size {
+    True -> False
+    False ->
+      case has_bytes_at(bytes, offset, marker) {
+        True -> True
+        False -> ole_scan_for_marker(bytes, marker, offset + 1)
+      }
+  }
+}
+
+fn looks_like_ole_word(bytes: BitArray) -> Bool {
+  has_ole_header(bytes) && ole_contains_marker(bytes, ole_word_marker)
+}
+
+fn looks_like_ole_excel(bytes: BitArray) -> Bool {
+  has_ole_header(bytes)
+  && {
+    ole_contains_marker(bytes, ole_workbook_marker)
+    || ole_contains_marker(bytes, ole_book_marker)
+  }
+}
+
+fn looks_like_ole_powerpoint(bytes: BitArray) -> Bool {
+  has_ole_header(bytes) && ole_contains_marker(bytes, ole_powerpoint_marker)
+}
+
+fn looks_like_ole_cfb(bytes: BitArray) -> Bool {
+  has_ole_header(bytes)
 }
 
 fn has_zlib_magic(bytes: BitArray) -> Bool {

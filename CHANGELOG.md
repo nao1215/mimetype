@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## [0.3.0] - 2026-04-27
+
+### Added
+
+- Add `Reader` type and `detect_reader`/`detect_reader_strict` functions for
+  streaming MIME detection without loading entire files into memory. The reader
+  callback is called once with the byte limit and the result is fed through
+  the existing magic pipeline. (#27)
+- Detect pre-2007 Microsoft Office binary formats via OLE Compound File Binary
+  (CFB) header and UTF-16LE stream name scanning: `.doc` → `application/msword`,
+  `.xls` → `application/vnd.ms-excel`, `.ppt` → `application/vnd.ms-powerpoint`.
+  Unrecognized CFB files fall back to `application/x-ole-storage`. (#21)
+- Detect ZIP-based container formats by inspecting local file header entry
+  filenames: EPUB (`application/epub+zip`), DOCX/XLSX/PPTX (Office Open XML),
+  JAR (`application/java-archive`), and APK
+  (`application/vnd.android.package-archive`). Generic ZIP archives continue
+  to return `application/zip`. (#16)
+
 ## [0.2.0] - 2026-04-26
 
 - Detect `application/json` from leading bytes via a bounded JSON-prefix

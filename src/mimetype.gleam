@@ -307,6 +307,42 @@ fn truncate_to_limit(bytes: BitArray, limit: Int) -> BitArray {
   bit_array.slice(bytes, 0, safe_limit) |> result.unwrap(<<>>)
 }
 
+/// A callback that reads up to the requested number of bytes from an
+/// input source. Returns `Ok(bits)` with the bytes actually read, or
+/// `Error(reason)` if the read fails. A reader that returns fewer bytes
+/// than requested signals end-of-input.
+pub type Reader =
+  fn(Int) -> Result(BitArray, String)
+
+/// Detect a MIME type by pulling at most `limit` leading bytes through
+/// a caller-supplied reader.
+///
+/// The reader is called once with `limit` as the requested byte count.
+/// If the reader returns an error, the default MIME type is returned.
+pub fn detect_reader(read: Reader, limit: Int) -> String {
+  case detect_reader_strict(read, limit) {
+    Ok(mime_type) -> mime_type
+    Error(Nil) -> default_mime_type
+  }
+}
+
+/// Detect a MIME type by pulling at most `limit` leading bytes through
+/// a caller-supplied reader.
+///
+/// This strict variant returns `Error(Nil)` when the reader fails or
+/// when no supported magic-number signature matches within the bytes
+/// returned.
+pub fn detect_reader_strict(read: Reader, limit: Int) -> Result(String, Nil) {
+  let safe_limit = case limit < 1 {
+    True -> 0
+    False -> limit
+  }
+  case read(safe_limit) {
+    Ok(bytes) -> detect_with_limit_strict(bytes, safe_limit)
+    Error(_) -> Error(Nil)
+  }
+}
+
 /// Detect a MIME type from bytes, falling back to an explicit
 /// extension when the content signature is unknown.
 ///

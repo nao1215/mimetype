@@ -605,6 +605,12 @@ pub fn detect_incomplete_mp4_brand_falls_back_to_default_test() {
   |> should.equal("application/octet-stream")
 }
 
+pub fn detect_partial_mp4_brand_falls_back_to_default_test() {
+  // 11 bytes: ftyp at 4-7 plus only 3 of the 4 brand bytes. The catch-all
+  // requires `byte_size >= 12`, so this must not match video/mp4.
+  should_fall_back(<<0:size(32), "ftyp":utf8, "abc":utf8>>)
+}
+
 pub fn detect_mp4_family_formats_test() {
   should_detect(<<0:size(32), "ftyp":utf8, "avif":utf8>>, "image/avif")
   should_detect(<<0:size(32), "ftyp":utf8, "heic":utf8>>, "image/heic")

@@ -1127,6 +1127,67 @@ pub fn detect_with_limit_strict_returns_error_when_below_offset_test() {
   |> should.equal(Error(Nil))
 }
 
+pub fn detect_reader_returns_same_as_detect_test() {
+  let png = <<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>
+  let reader = fn(_limit) { Ok(png) }
+  mimetype.detect_reader(reader, 3072)
+  |> should.equal("image/png")
+}
+
+pub fn detect_reader_truncated_prefix_falls_back_test() {
+  // TAR signature at offset 257 — only 64 bytes provided
+  let short_bytes = <<0:size({ 64 * 8 })>>
+  let reader = fn(_limit) { Ok(short_bytes) }
+  mimetype.detect_reader(reader, 3072)
+  |> should.equal("application/octet-stream")
+}
+
+pub fn detect_reader_short_eof_still_detects_test() {
+  // Reader returns fewer bytes than limit but contains a valid PNG signature
+  let png = <<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>
+  let reader = fn(_limit) { Ok(png) }
+  mimetype.detect_reader(reader, 8192)
+  |> should.equal("image/png")
+}
+
+pub fn detect_reader_strict_error_returns_error_nil_test() {
+  let reader = fn(_limit) { Error("disk read failure") }
+  mimetype.detect_reader_strict(reader, 3072)
+  |> should.equal(Error(Nil))
+}
+
+pub fn detect_reader_error_returns_default_test() {
+  let reader = fn(_limit) { Error("io error") }
+  mimetype.detect_reader(reader, 3072)
+  |> should.equal("application/octet-stream")
+}
+
+pub fn detect_reader_called_with_limit_test() {
+  // Verify reader receives the limit value
+  let reader = fn(requested) {
+    case requested {
+      100 -> Ok(<<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>)
+      _ -> Error("unexpected limit")
+    }
+  }
+  mimetype.detect_reader(reader, 100)
+  |> should.equal("image/png")
+}
+
+pub fn detect_reader_strict_ok_test() {
+  let png = <<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>
+  let reader = fn(_limit) { Ok(png) }
+  mimetype.detect_reader_strict(reader, 3072)
+  |> should.equal(Ok("image/png"))
+}
+
+pub fn detect_reader_strict_no_match_returns_error_test() {
+  let unknown = <<0x00, 0x01, 0x02, 0x03>>
+  let reader = fn(_limit) { Ok(unknown) }
+  mimetype.detect_reader_strict(reader, 3072)
+  |> should.equal(Error(Nil))
+}
+
 pub fn is_a_reflexive_test() {
   mimetype.is_a("application/zip", "application/zip")
   |> should.equal(True)

@@ -348,35 +348,63 @@ fn truncate_to_limit(bytes: BitArray, limit: Int) -> BitArray {
 /// input source. Returns `Ok(bits)` with the bytes actually read, or
 /// `Error(reason)` if the read fails. A reader that returns fewer bytes
 /// than requested signals end-of-input.
-pub type Reader =
-  fn(Int) -> Result(BitArray, String)
+///
+/// The error type is generic so JS-side readers (FileReader,
+/// ReadableStream) and BEAM-side readers (file handles, HTTP clients)
+/// can preserve their richer error shapes through `detect_reader_strict`.
+pub type Reader(read_error) =
+  fn(Int) -> Result(BitArray, read_error)
+
+/// Reasons `detect_reader_strict` can return `Error(_)`.
+///
+/// The error is structured so callers can distinguish "no signature
+/// matched" from "the reader itself failed before any bytes could be
+/// inspected" — useful for HTTP upload pipelines that want to render
+/// "couldn't read the file" differently from "we don't recognise this
+/// format". `read_error` is the type the supplied `Reader` produces;
+/// it flows through unchanged when the reader fails.
+pub type DetectionError(read_error) {
+  /// No signature matched the bytes that were inspected.
+  NoMatch
+  /// The reader returned an error before any bytes could be inspected.
+  ReaderError(read_error)
+}
 
 /// Detect a MIME type by pulling at most `limit` leading bytes through
 /// a caller-supplied reader.
 ///
 /// The reader is called once with `limit` as the requested byte count.
 /// If the reader returns an error, the default MIME type is returned.
-pub fn detect_reader(read: Reader, limit: Int) -> String {
+pub fn detect_reader(read: Reader(read_error), limit: Int) -> String {
   case detect_reader_strict(read, limit) {
     Ok(mime_type) -> mime_type
-    Error(Nil) -> default_mime_type
+    Error(_) -> default_mime_type
   }
 }
 
 /// Detect a MIME type by pulling at most `limit` leading bytes through
 /// a caller-supplied reader.
 ///
-/// This strict variant returns `Error(Nil)` when the reader fails or
-/// when no supported magic-number signature matches within the bytes
-/// returned.
-pub fn detect_reader_strict(read: Reader, limit: Int) -> Result(String, Nil) {
+/// Returns `Error(ReaderError(e))` when the reader itself failed, or
+/// `Error(NoMatch)` when the reader produced bytes but no supported
+/// magic-number signature matched within them. The reader's own error
+/// type flows through `ReaderError(_)` unchanged so callers can render
+/// it however they wish.
+pub fn detect_reader_strict(
+  read: Reader(read_error),
+  limit: Int,
+) -> Result(String, DetectionError(read_error)) {
   let safe_limit = case limit < 1 {
     True -> 0
     False -> limit
   }
   case read(safe_limit) {
-    Ok(bytes) -> detect_with_limit_strict(bytes, safe_limit)
-    Error(_) -> Error(Nil)
+    Ok(bytes) ->
+      case detect_with_limit_strict(bytes, safe_limit) {
+        Ok(mime_type) -> Ok(mime_type)
+        Error(Nil) -> Error(NoMatch)
+      }
+    Error(read_error) -> Error(ReaderError(read_error))
   }
 }
 

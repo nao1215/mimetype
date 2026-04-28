@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+### Changed
+
+- **Reader (BREAKING)**: `Reader = fn(Int) -> Result(BitArray, String)`
+  is now `Reader(read_error) = fn(Int) -> Result(BitArray, read_error)`.
+  Generic `read_error` lets JS-side readers (FileReader,
+  ReadableStream) and BEAM-side readers (file handles, HTTP clients)
+  preserve their richer error shapes through `detect_reader_strict`
+  instead of being collapsed to a stringly-typed placeholder.
+- **detect_reader_strict (BREAKING)**: returns
+  `Result(String, DetectionError(read_error))` instead of
+  `Result(String, Nil)`. The new `DetectionError(e)` type has two
+  variants: `NoMatch` (the reader produced bytes but no signature
+  matched) and `ReaderError(e)` (the reader itself failed before
+  any bytes could be inspected, carrying the reader's own error
+  through unchanged). Callers can now distinguish a
+  format-recognition failure from an upstream read failure — useful
+  for HTTP upload pipelines that want to render "couldn't read the
+  file" differently from "we don't recognise this format".
+  Migration: the lenient `detect_reader/2` shape is unchanged
+  (still returns `String`); call sites that previously matched
+  `Error(Nil)` against `detect_reader_strict` switch to matching
+  `Error(NoMatch)` or `Error(ReaderError(_))`. (#61, partial)
+
+### Notes
+
+- This is a partial fix toward #61: only the `Reader`-bearing path
+  carries the new structured error. The other `*_strict` functions
+  in the strict family (`extension_to_mime_type_strict`,
+  `filename_to_mime_type_strict`, `detect_strict`,
+  `detect_with_limit_strict`, `detect_signature_only`,
+  `detect_with_extension_strict`, `detect_with_filename_strict`,
+  `parameter`, `charset`, `charset_of`) still return
+  `Result(_, Nil)`. Migrating those to a unified
+  `DetectionError(_)` shape is its own follow-up because each one
+  has a different "no useful answer" reason
+  (`UnknownExtension(_)`, `EmptyInput`, …) that needs a separate
+  modelling pass.
+
 ## [0.6.0] - 2026-04-28
 
 ### Fixed

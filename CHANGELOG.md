@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.5.0] - 2026-04-28
+
 ### Documentation
 
 - `detect/1` and `detect_strict/1` docstrings now spell out the

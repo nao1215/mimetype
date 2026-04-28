@@ -51,6 +51,12 @@ pub fn main() {
   mimetype.detect(<<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>)
   // -> "image/png"
 
+  mimetype.detect(<<>>)
+  // -> "application/octet-stream"  (silent fallback for unknown / empty input)
+
+  mimetype.detect_strict(<<>>)
+  // -> Error(Nil)  (loud variant — distinguishes "no signature" from a match)
+
   mimetype.detect_with_filename(<<0, 1, 2, 3>>, "report.csv")
   // -> "text/csv"
 }

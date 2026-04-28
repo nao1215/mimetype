@@ -259,8 +259,13 @@ pub fn filename_to_mime_type_strict(path: String) -> Result(String, Nil) {
 /// `image/avif`, `image/heic`, `video/x-msvideo`, `video/webm`,
 /// `video/quicktime`, and `video/mp4`.
 ///
-/// If no signature matches, the default fallback MIME type is
-/// returned.
+/// Returns `"application/octet-stream"` (the value of
+/// `default_mime_type`) when the input carries no recognisable magic
+/// bytes — including the empty `BitArray`. The fallback is silent: a
+/// caller that needs to distinguish "no signature matched" from
+/// "signature matched but produced `application/octet-stream`" should
+/// use `detect_strict/1`, which returns `Error(Nil)` for the
+/// no-match case.
 pub fn detect(bytes: BitArray) -> String {
   detect_with_limit(bytes, default_detection_limit)
 }
@@ -268,7 +273,11 @@ pub fn detect(bytes: BitArray) -> String {
 /// Detect a MIME type from the leading bytes of a blob.
 ///
 /// This strict variant returns `Error(Nil)` when no supported
-/// magic-number signature matches.
+/// magic-number signature matches the input (including the empty
+/// `BitArray`), so the caller can distinguish "no signature found"
+/// from "signature matched". Prefer this variant when the
+/// `application/octet-stream` fallback would be ambiguous; use
+/// `detect/1` when an unconditional `String` is more convenient.
 pub fn detect_strict(bytes: BitArray) -> Result(String, Nil) {
   detect_with_limit_strict(bytes, default_detection_limit)
 }

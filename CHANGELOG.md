@@ -4,6 +4,14 @@
 
 ### Documentation
 
+- `detect/1` and `detect_strict/1` docstrings now spell out the
+  fallback contract: `detect/1` returns `"application/octet-stream"`
+  (the value of `default_mime_type`) for any input with no recognisable
+  magic bytes, including the empty `BitArray`, while `detect_strict/1`
+  returns `Error(Nil)` for the same case so callers can tell "no
+  signature found" from "signature found". The README's `detect`
+  example block also shows the empty-input + `detect_strict/1` pair so
+  the choice between the two surfaces near the first usage line. (#54)
 - README correctly describes what the library does and does not sniff.
   The previous wording claimed `mimetype` "does not detect text encodings
   or sniff `text/plain` heuristically" and "does not currently expose

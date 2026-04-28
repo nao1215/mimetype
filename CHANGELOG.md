@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.7.0] - 2026-04-28
+
 ### Changed
 
 - **Reader (BREAKING)**: `Reader = fn(Int) -> Result(BitArray, String)`

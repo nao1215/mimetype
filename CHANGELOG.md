@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.6.0] - 2026-04-28
+
 ### Fixed
 
 - `detect_with_filename/2` and `detect_with_extension/2` now consult

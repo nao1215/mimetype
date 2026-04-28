@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Documentation
+
+- README correctly describes what the library does and does not sniff.
+  The previous wording claimed `mimetype` "does not detect text encodings
+  or sniff `text/plain` heuristically" and "does not currently expose
+  dedicated charset or MIME-parameter parsing helpers" — both contradicted
+  the printable-ASCII heuristic added in #20 and the four UTF-BOM
+  signatures (which surface `text/plain; charset=utf-*`). The relevant
+  bullets now describe the actual behaviour: bare `text/plain` for
+  printable-ASCII payloads, `text/plain; charset=<utf-X>` for the four
+  BOM signatures, and no other MIME-parameter parsing or text-encoding
+  detection. (#53)
+
 ## [0.4.0] - 2026-04-27
 
 ### Changed

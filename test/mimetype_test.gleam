@@ -1539,10 +1539,10 @@ pub fn detect_reader_short_eof_still_detects_test() {
   |> should.equal("image/png")
 }
 
-pub fn detect_reader_strict_error_returns_error_nil_test() {
+pub fn detect_reader_strict_error_preserves_reader_error_test() {
   let reader = fn(_limit) { Error("disk read failure") }
   mimetype.detect_reader_strict(reader, 3072)
-  |> should.equal(Error(Nil))
+  |> should.equal(Error(mimetype.ReaderError("disk read failure")))
 }
 
 pub fn detect_reader_error_returns_default_test() {
@@ -1570,11 +1570,11 @@ pub fn detect_reader_strict_ok_test() {
   |> should.equal(Ok("image/png"))
 }
 
-pub fn detect_reader_strict_no_match_returns_error_test() {
+pub fn detect_reader_strict_no_match_returns_no_match_test() {
   let unknown = <<0x00, 0x01, 0x02, 0x03>>
-  let reader = fn(_limit) { Ok(unknown) }
+  let reader: fn(Int) -> Result(BitArray, String) = fn(_limit) { Ok(unknown) }
   mimetype.detect_reader_strict(reader, 3072)
-  |> should.equal(Error(Nil))
+  |> should.equal(Error(mimetype.NoMatch))
 }
 
 pub fn is_a_reflexive_test() {

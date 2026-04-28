@@ -747,6 +747,80 @@ pub fn detect_with_filename_prefers_magic_over_extension_test() {
   |> should.equal("image/png")
 }
 
+// Regression: issue #58 — printable-ASCII content used to be treated
+// as a "matched signature" by `detect_with_filename`, so the filename
+// hint was ignored. `text/csv` for `.csv` is the canonical case.
+pub fn detect_with_filename_prefers_filename_over_printable_ascii_csv_test() {
+  let bytes = <<
+    "type,severity,message,occurred_at\nlogin,info,hi,2026-04-28\n":utf8,
+  >>
+  mimetype.detect_with_filename(bytes, "fixtures.csv")
+  |> should.equal("text/csv")
+}
+
+pub fn detect_with_filename_prefers_filename_over_printable_ascii_md_test() {
+  mimetype.detect_with_filename(<<"# Title\n\nbody\n":utf8>>, "dump.md")
+  |> should.equal("text/markdown")
+}
+
+pub fn detect_with_filename_falls_back_to_text_plain_when_filename_unknown_test() {
+  // Plain ASCII + filename without a known extension: the
+  // printable-ASCII heuristic is still the right last resort.
+  mimetype.detect_with_filename(<<"plain text\n":utf8>>, "README")
+  |> should.equal("text/plain")
+}
+
+pub fn detect_with_extension_prefers_extension_over_printable_ascii_csv_test() {
+  mimetype.detect_with_extension(<<"a,b,c\n1,2,3\n":utf8>>, "csv")
+  |> should.equal("text/csv")
+}
+
+pub fn detect_with_extension_strict_prefers_extension_over_printable_ascii_csv_test() {
+  mimetype.detect_with_extension_strict(<<"a,b,c\n1,2,3\n":utf8>>, "csv")
+  |> should.equal(Ok("text/csv"))
+}
+
+pub fn detect_with_extension_falls_back_to_text_plain_when_extension_unknown_test() {
+  mimetype.detect_with_extension(<<"plain text\n":utf8>>, "totally-unknown-ext")
+  |> should.equal("text/plain")
+}
+
+pub fn detect_signature_only_returns_ok_for_binary_signature_test() {
+  mimetype.detect_signature_only(<<
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+  >>)
+  |> should.equal(Ok("image/png"))
+}
+
+pub fn detect_signature_only_returns_ok_for_structural_sniff_test() {
+  mimetype.detect_signature_only(<<"{\"x\":1}":utf8>>)
+  |> should.equal(Ok("application/json"))
+}
+
+pub fn detect_signature_only_returns_ok_for_bom_tagged_text_test() {
+  // BOM-tagged text is a real signature, not the printable-ASCII
+  // heuristic, so it must still be returned.
+  mimetype.detect_signature_only(<<0xEF, 0xBB, 0xBF, "hello":utf8>>)
+  |> should.equal(Ok("text/plain; charset=utf-8"))
+}
+
+pub fn detect_signature_only_returns_error_for_printable_ascii_test() {
+  // The whole point of this helper: plain printable ASCII is *not*
+  // a signature match here.
+  mimetype.detect_signature_only(<<"plain text\n":utf8>>)
+  |> should.equal(Error(Nil))
+}
+
+pub fn detect_signature_only_returns_error_for_empty_test() {
+  mimetype.detect_signature_only(<<>>)
+  |> should.equal(Error(Nil))
+}
+
+pub fn detect_signature_only_returns_error_for_unknown_binary_test() {
+  mimetype.detect_signature_only(<<1, 2, 3, 4>>)
+  |> should.equal(Error(Nil))
+}
+
 pub fn detect_json_empty_object_test() {
   should_detect(<<"{}":utf8>>, "application/json")
 }

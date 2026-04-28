@@ -237,6 +237,35 @@ pub fn detect(bytes: BitArray) -> Option(String) {
   }
 }
 
+/// Like `detect` but excludes the printable-ASCII heuristic.
+///
+/// Returns `Some(mime_type)` only for genuine signature matches: byte
+/// magic numbers (PNG, JPEG, ZIP, ...) and structural sniffs that
+/// inspect bytes (JSON, HTML, XML, SVG). Returns `None` for plain-ASCII
+/// payloads where `detect` would have returned `Some("text/plain")`.
+pub fn detect_signature(bytes: BitArray) -> Option(String) {
+  let result =
+    signatures
+    |> list.filter(fn(signature) { !is_printable_ascii_fallback(signature) })
+    |> list.find_map(detect_match(bytes, _))
+  case result {
+    Ok(mime_type) -> Some(mime_type)
+    Error(Nil) -> None
+  }
+}
+
+// The printable-ASCII fallback is the only `Check("text/plain", _)`
+// entry in `signatures`: every other `text/plain` entry uses `Bytes`
+// to match a specific BOM. Filtering on this shape keeps
+// `detect_signature` from accepting plain-ASCII text as a "real"
+// signature match while still returning the BOM-tagged variants.
+fn is_printable_ascii_fallback(signature: Signature) -> Bool {
+  case signature {
+    Check("text/plain", _) -> True
+    _ -> False
+  }
+}
+
 fn detect_match(bytes: BitArray, signature: Signature) -> Result(String, Nil) {
   let mime_type = signature_mime_type(signature)
 

@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Fixed
+
+- `detect_with_filename/2` and `detect_with_extension/2` now consult
+  the filename / extension hint when the byte signature side only
+  matched the printable-ASCII fallback. Previously the
+  printable-ASCII heuristic was treated as a "match", so a `.csv`
+  filename paired with CSV content returned `text/plain` and the
+  filename hint was silently ignored — defeating the canonical use
+  case ("I have an upload, here's a `.csv` filename hint, give me
+  a sensible Content-Type"). Genuine binary or structural signatures
+  (PNG, JPEG, ZIP, JSON / HTML / XML / SVG, BOM-tagged text, ...)
+  still take priority over the filename hint. The printable-ASCII
+  heuristic remains the last-resort fallback when neither the byte
+  signature nor the filename's extension is recognisable. (#58)
+
+### Added
+
+- `detect_signature_only/1` and `detect_signature_only_with_limit/2`
+  expose the "genuine signature only" detection path: real magic
+  numbers and structural sniffs return `Ok(mime_type)`, plain-ASCII
+  payloads return `Error(Nil)`. This is the building block behind
+  the `detect_with_filename` / `detect_with_extension` fix above and
+  is useful for callers that want to compose their own fallback
+  shape against a stronger out-of-band hint. (#58)
+
 ## [0.5.0] - 2026-04-28
 
 ### Documentation

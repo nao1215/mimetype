@@ -306,6 +306,34 @@ pub fn detect_with_limit_strict(
   result_from_option(magic.detect(truncate_to_limit(bytes, limit)))
 }
 
+/// Detect a MIME type from a genuine binary or structural signature
+/// only.
+///
+/// Like `detect_strict` but excludes the printable-ASCII heuristic that
+/// otherwise classifies every plain-ASCII payload as `text/plain`.
+/// Returns `Ok(mime_type)` for byte magic numbers (PNG, JPEG, ZIP,
+/// `text/plain; charset=utf-*` BOMs, ...) and structural sniffs that
+/// inspect bytes (JSON, HTML, XML, SVG). Returns `Error(Nil)` for
+/// arbitrary printable-ASCII text — letting the caller defer to a
+/// stronger out-of-band hint such as a filename extension.
+///
+/// This is the building block behind `detect_with_filename` /
+/// `detect_with_extension`: a `.csv` filename is a stronger signal
+/// than the byte-level fact "this is printable ASCII", so those
+/// helpers consult the filename hint when the only thing the byte
+/// side could say was `text/plain`.
+pub fn detect_signature_only(bytes: BitArray) -> Result(String, Nil) {
+  detect_signature_only_with_limit(bytes, default_detection_limit)
+}
+
+/// `detect_signature_only` with an explicit byte budget.
+pub fn detect_signature_only_with_limit(
+  bytes: BitArray,
+  limit: Int,
+) -> Result(String, Nil) {
+  result_from_option(magic.detect_signature(truncate_to_limit(bytes, limit)))
+}
+
 fn truncate_to_limit(bytes: BitArray, limit: Int) -> BitArray {
   let size = bit_array.byte_size(bytes)
   let safe_limit = case limit < 0, limit > size {
@@ -352,11 +380,17 @@ pub fn detect_reader_strict(read: Reader, limit: Int) -> Result(String, Nil) {
   }
 }
 
-/// Detect a MIME type from bytes, falling back to an explicit
-/// extension when the content signature is unknown.
+/// Detect a MIME type from bytes, consulting an explicit extension
+/// hint when the byte signature alone is not specific enough.
 ///
-/// This helper prefers the byte signature over the extension if the
-/// two disagree.
+/// Genuine binary signatures (PNG, JPEG, ZIP, BOM-tagged text, ...) and
+/// structural sniffs (JSON, HTML, XML, SVG) win over the extension
+/// hint. The extension takes priority when the only thing the byte
+/// side could say was the printable-ASCII fallback `text/plain` — a
+/// `.csv` extension is a stronger signal for plain-ASCII payloads than
+/// the byte-level fact "this looks textish". The printable-ASCII
+/// fallback is still used as a last resort when neither the byte
+/// signature nor the extension is recognisable.
 pub fn detect_with_extension(bytes: BitArray, extension: String) -> String {
   case detect_with_extension_strict(bytes, extension) {
     Ok(mime_type) -> mime_type
@@ -364,26 +398,37 @@ pub fn detect_with_extension(bytes: BitArray, extension: String) -> String {
   }
 }
 
-/// Detect a MIME type from bytes, falling back to an explicit
-/// extension when the content signature is unknown.
+/// Detect a MIME type from bytes, consulting an explicit extension
+/// hint when the byte signature alone is not specific enough.
 ///
 /// This strict variant returns `Error(Nil)` only when neither the byte
-/// signature nor the normalized extension are known.
+/// signature, the normalised extension, nor the printable-ASCII
+/// fallback succeed.
 pub fn detect_with_extension_strict(
   bytes: BitArray,
   extension: String,
 ) -> Result(String, Nil) {
-  case detect_strict(bytes) {
+  case detect_signature_only(bytes) {
     Ok(mime_type) -> Ok(mime_type)
-    Error(Nil) -> extension_to_mime_type_strict(extension)
+    Error(Nil) ->
+      case extension_to_mime_type_strict(extension) {
+        Ok(mime_type) -> Ok(mime_type)
+        Error(Nil) -> detect_strict(bytes)
+      }
   }
 }
 
-/// Detect a MIME type from bytes, falling back to the filename
-/// extension when the content signature is unknown.
+/// Detect a MIME type from bytes, consulting the filename extension
+/// when the byte signature alone is not specific enough.
 ///
-/// This helper prefers the byte signature over the filename if the two
-/// disagree.
+/// Genuine binary signatures (PNG, JPEG, ZIP, BOM-tagged text, ...) and
+/// structural sniffs (JSON, HTML, XML, SVG) win over the filename. The
+/// filename takes priority when the only thing the byte side could say
+/// was the printable-ASCII fallback `text/plain` — a `report.csv`
+/// filename is a stronger signal for plain-ASCII payloads than the
+/// byte-level fact "this looks textish". The printable-ASCII fallback
+/// is still used as a last resort when neither the byte signature nor
+/// the filename's extension is recognisable.
 pub fn detect_with_filename(bytes: BitArray, filename: String) -> String {
   case detect_with_filename_strict(bytes, filename) {
     Ok(mime_type) -> mime_type
@@ -391,18 +436,23 @@ pub fn detect_with_filename(bytes: BitArray, filename: String) -> String {
   }
 }
 
-/// Detect a MIME type from bytes, falling back to the filename
-/// extension when the content signature is unknown.
+/// Detect a MIME type from bytes, consulting the filename extension
+/// when the byte signature alone is not specific enough.
 ///
 /// This strict variant returns `Error(Nil)` only when neither the byte
-/// signature nor the filename extension are known.
+/// signature, the filename extension, nor the printable-ASCII fallback
+/// succeed.
 pub fn detect_with_filename_strict(
   bytes: BitArray,
   filename: String,
 ) -> Result(String, Nil) {
-  case detect_strict(bytes) {
+  case detect_signature_only(bytes) {
     Ok(mime_type) -> Ok(mime_type)
-    Error(Nil) -> filename_to_mime_type_strict(filename)
+    Error(Nil) ->
+      case filename_to_mime_type_strict(filename) {
+        Ok(mime_type) -> Ok(mime_type)
+        Error(Nil) -> detect_strict(bytes)
+      }
   }
 }
 

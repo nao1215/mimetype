@@ -30,8 +30,8 @@ the generated table keeps lookups aligned with that upstream source.
 This library intentionally stays focused:
 
 - It does not do deep container introspection such as distinguishing Office formats inside ZIP
-- It does not detect text encodings or sniff `text/plain` heuristically
-- It does not currently expose dedicated charset or MIME-parameter parsing helpers
+- It does sniff `text/plain` from printable-ASCII-only payloads (the bounded WHATWG-style binary-vs-text heuristic added in #20) and recognises the UTF-8/16/32 BOM signatures, returning `text/plain; charset=<utf-X>` for the BOM cases. This is the **only** text-related sniffing — it does not detect text encodings beyond the BOM marker, and the printable-ASCII fallback emits a bare `text/plain` with no charset parameter.
+- Beyond the four BOM-derived `text/plain; charset=utf-*` signatures it does not parse, validate, or surface MIME-parameter values from the wire.
 
 ## Usage
 

@@ -1,5 +1,5 @@
 name = "mimetype"
-version = "0.4.0"
+version = "0.5.0"
 description = "MIME type lookup and magic-number detection for Gleam on Erlang and JavaScript targets"
 licences = ["MIT"]
 repository = { type = "github", user = "nao1215", repo = "mimetype" }

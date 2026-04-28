@@ -378,7 +378,8 @@ pub type DetectionError(read_error) {
 pub fn detect_reader(read: Reader(read_error), limit: Int) -> String {
   case detect_reader_strict(read, limit) {
     Ok(mime_type) -> mime_type
-    Error(_) -> default_mime_type
+    Error(NoMatch) -> default_mime_type
+    Error(ReaderError(_)) -> default_mime_type
   }
 }
 

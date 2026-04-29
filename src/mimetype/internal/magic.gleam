@@ -88,6 +88,9 @@ const signatures = [
     [#(0, <<0xEF, 0xBB, 0xBF, 0x25, 0x50, 0x44, 0x46, 0x2D>>)],
   ),
   Check("application/epub+zip", looks_like_epub),
+  Check("application/vnd.oasis.opendocument.text", looks_like_odt),
+  Check("application/vnd.oasis.opendocument.spreadsheet", looks_like_ods),
+  Check("application/vnd.oasis.opendocument.presentation", looks_like_odp),
   Check(
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     looks_like_docx,
@@ -917,12 +920,42 @@ fn zip_filenames_contain(filenames: List(String), prefix: String) -> Bool {
   list.any(filenames, fn(name) { string.starts_with(name, prefix) })
 }
 
+const zip_stored_mimetype_entry_name = <<"mimetype":utf8>>
+
+fn looks_like_zip_with_stored_mimetype(
+  bytes: BitArray,
+  expected_mime_type: BitArray,
+) -> Bool {
+  use <- bool.guard(when: !has_zip_header(bytes), return: False)
+  let filename_offset = 30
+  let content_offset =
+    filename_offset + bit_array.byte_size(zip_stored_mimetype_entry_name)
+  has_bytes_at(bytes, filename_offset, zip_stored_mimetype_entry_name)
+  && has_bytes_at(bytes, content_offset, expected_mime_type)
+}
+
 fn looks_like_epub(bytes: BitArray) -> Bool {
   // EPUB requires "mimetype" as the first entry, stored uncompressed at
   // offset 30, with content "application/epub+zip".
-  use <- bool.guard(when: !has_zip_header(bytes), return: False)
-  has_bytes_at(bytes, 30, <<"mimetype":utf8>>)
-  && has_bytes_at(bytes, 38, <<"application/epub+zip":utf8>>)
+  looks_like_zip_with_stored_mimetype(bytes, <<"application/epub+zip":utf8>>)
+}
+
+fn looks_like_odt(bytes: BitArray) -> Bool {
+  looks_like_zip_with_stored_mimetype(bytes, <<
+    "application/vnd.oasis.opendocument.text":utf8,
+  >>)
+}
+
+fn looks_like_ods(bytes: BitArray) -> Bool {
+  looks_like_zip_with_stored_mimetype(bytes, <<
+    "application/vnd.oasis.opendocument.spreadsheet":utf8,
+  >>)
+}
+
+fn looks_like_odp(bytes: BitArray) -> Bool {
+  looks_like_zip_with_stored_mimetype(bytes, <<
+    "application/vnd.oasis.opendocument.presentation":utf8,
+  >>)
 }
 
 fn looks_like_jar(bytes: BitArray) -> Bool {

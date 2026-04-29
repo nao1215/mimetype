@@ -18,6 +18,32 @@ fn should_fall_back(bytes) {
   |> should.equal("application/octet-stream")
 }
 
+fn stored_mimetype_zip_archive(mime_type: BitArray) -> BitArray {
+  let mime_type_size = bit_array.byte_size(mime_type)
+
+  bit_array.concat([
+    // Local file header signature
+    <<0x50, 0x4B, 0x03, 0x04>>,
+    // Version needed (2), flags (2), compression=stored (2)
+    <<0x14, 0x00, 0x00, 0x00, 0x00, 0x00>>,
+    // Last mod time (2), last mod date (2)
+    <<0x00, 0x00, 0x00, 0x00>>,
+    // CRC-32 (4)
+    <<0x00, 0x00, 0x00, 0x00>>,
+    // Compressed size = mime_type_size (4, little-endian)
+    <<mime_type_size, 0x00, 0x00, 0x00>>,
+    // Uncompressed size = mime_type_size (4, little-endian)
+    <<mime_type_size, 0x00, 0x00, 0x00>>,
+    // Filename length = 8 (2, little-endian)
+    <<0x08, 0x00>>,
+    // Extra field length = 0 (2)
+    <<0x00, 0x00>>,
+    // Filename: "mimetype"
+    <<"mimetype":utf8>>,
+    mime_type,
+  ])
+}
+
 pub fn extension_to_mime_type_normalizes_input_test() {
   mimetype.extension_to_mime_type(".JSON")
   |> should.equal("application/json")
@@ -331,30 +357,32 @@ pub fn detect_archive_and_compression_formats_test() {
 pub fn detect_epub_test() {
   // EPUB: ZIP with "mimetype" as first entry containing "application/epub+zip"
   // Local file header: PK\x03\x04 + 22 bytes header + filename + data
-  let epub =
-    bit_array.concat([
-      // Local file header signature
-      <<0x50, 0x4B, 0x03, 0x04>>,
-      // Version needed (2), flags (2), compression=stored (2)
-      <<0x14, 0x00, 0x00, 0x00, 0x00, 0x00>>,
-      // Last mod time (2), last mod date (2)
-      <<0x00, 0x00, 0x00, 0x00>>,
-      // CRC-32 (4)
-      <<0x00, 0x00, 0x00, 0x00>>,
-      // Compressed size = 20 (4, little-endian)
-      <<0x14, 0x00, 0x00, 0x00>>,
-      // Uncompressed size = 20 (4, little-endian)
-      <<0x14, 0x00, 0x00, 0x00>>,
-      // Filename length = 8 (2, little-endian)
-      <<0x08, 0x00>>,
-      // Extra field length = 0 (2)
-      <<0x00, 0x00>>,
-      // Filename: "mimetype"
-      <<"mimetype":utf8>>,
-      // File data: "application/epub+zip"
-      <<"application/epub+zip":utf8>>,
-    ])
+  let epub = stored_mimetype_zip_archive(<<"application/epub+zip":utf8>>)
   should_detect(epub, "application/epub+zip")
+}
+
+pub fn detect_odt_test() {
+  let odt =
+    stored_mimetype_zip_archive(<<
+      "application/vnd.oasis.opendocument.text":utf8,
+    >>)
+  should_detect(odt, "application/vnd.oasis.opendocument.text")
+}
+
+pub fn detect_ods_test() {
+  let ods =
+    stored_mimetype_zip_archive(<<
+      "application/vnd.oasis.opendocument.spreadsheet":utf8,
+    >>)
+  should_detect(ods, "application/vnd.oasis.opendocument.spreadsheet")
+}
+
+pub fn detect_odp_test() {
+  let odp =
+    stored_mimetype_zip_archive(<<
+      "application/vnd.oasis.opendocument.presentation":utf8,
+    >>)
+  should_detect(odp, "application/vnd.oasis.opendocument.presentation")
 }
 
 pub fn detect_docx_test() {

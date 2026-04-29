@@ -631,15 +631,49 @@ fn parse_parameters(segments: List(String)) -> List(#(String, String)) {
     case string.split_once(seg, on: "=") {
       Ok(#(name, value)) -> {
         let normalized_name = name |> string.trim |> string.lowercase
-        let trimmed_value = string.trim(value)
+        let normalized_value = value |> string.trim |> unquote_value
         case normalized_name {
           "" -> Error(Nil)
-          _ -> Ok(#(normalized_name, trimmed_value))
+          _ -> Ok(#(normalized_name, normalized_value))
         }
       }
       Error(Nil) -> Error(Nil)
     }
   })
+}
+
+/// Unwrap a parameter value from RFC 7230 §3.2.6 quoted-string form.
+///
+/// If `value` is delimited by surrounding `"`, strip them and decode any
+/// backslash escapes inside (`\X` → `X`). Values that are not delimited
+/// (token form per RFC 7230 §3.2.6) pass through unchanged. Malformed
+/// inputs — a leading `"` without a matching trailing `"`, or a trailing
+/// `\` with nothing after it — also pass through unchanged so the parser
+/// remains tolerant of off-spec wire input.
+fn unquote_value(value: String) -> String {
+  use <- bool.guard(
+    when: !{ string.starts_with(value, "\"") && string.ends_with(value, "\"") },
+    return: value,
+  )
+  // Reject the lone `"` case (length 1: starts AND ends match the
+  // same character, so the slice is empty but we'd otherwise
+  // discard the original character).
+  use <- bool.guard(when: string.length(value) < 2, return: value)
+  let inner = value |> string.drop_start(1) |> string.drop_end(1)
+  unescape_quoted(inner, "")
+}
+
+fn unescape_quoted(remaining: String, acc: String) -> String {
+  case string.pop_grapheme(remaining) {
+    Error(Nil) -> acc
+    Ok(#("\\", rest)) ->
+      case string.pop_grapheme(rest) {
+        Ok(#(escaped, after)) -> unescape_quoted(after, acc <> escaped)
+        // Trailing lone backslash: keep it as-is.
+        Error(Nil) -> acc <> "\\"
+      }
+    Ok(#(other, rest)) -> unescape_quoted(rest, acc <> other)
+  }
 }
 
 /// Build a `MimeType` from a string produced by an internal source

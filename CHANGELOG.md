@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Fixed
+
+- **`parse`** now strips the surrounding `"` delimiters from quoted-string
+  parameter values per RFC 7230 §3.2.6, and decodes backslash escapes
+  inside (`\X` → `X`). `parameter_of(parse("text/html; charset=\"utf-8\""), "charset")`
+  now returns `Some("utf-8")` instead of `Some("\"utf-8\"")`. The same
+  fix unwraps quoted boundaries (`boundary="foo\"bar"` decodes to `foo"bar`)
+  and stabilises round-tripping through `to_string` + `parse`. Token-form
+  values pass through unchanged. Malformed inputs (lone `"`, unmatched
+  leading `"`, trailing lone `\`) are passed through unchanged so the
+  parser stays tolerant of off-spec wire input. (#69)
+
 ## [0.8.0] - 2026-04-29
 
 ### Added

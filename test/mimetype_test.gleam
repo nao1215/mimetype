@@ -222,6 +222,71 @@ pub fn charset_of_type_returns_none_when_missing_test() {
   |> should.equal(None)
 }
 
+// RFC 7230 §3.2.6: parameter values may be expressed as quoted-string
+// (DQUOTE qdtext DQUOTE). The surrounding `"` are syntax, not part of
+// the value, so the parser must strip them.
+
+pub fn parameter_of_strips_surrounding_quotes_test() {
+  mt("text/html; charset=\"utf-8\"")
+  |> mimetype.parameter_of("charset")
+  |> should.equal(Some("utf-8"))
+}
+
+pub fn charset_of_type_strips_surrounding_quotes_test() {
+  mt("text/html; charset=\"UTF-8\"")
+  |> mimetype.charset_of_type
+  |> should.equal(Some("utf-8"))
+}
+
+pub fn parameter_of_unescapes_backslash_escapes_in_quoted_value_test() {
+  // RFC 7230 §3.2.6 quoted-pair: `\X` decodes to `X`. So
+  // `name="foo\"bar"` decodes to `foo"bar`.
+  mt("multipart/form-data; boundary=\"foo\\\"bar\"")
+  |> mimetype.parameter_of("boundary")
+  |> should.equal(Some("foo\"bar"))
+}
+
+pub fn parameter_of_unescapes_double_backslash_test() {
+  // `\\` decodes to a single `\`.
+  mt("text/plain; charset=\"a\\\\b\"")
+  |> mimetype.parameter_of("charset")
+  |> should.equal(Some("a\\b"))
+}
+
+pub fn parameter_of_token_value_unchanged_test() {
+  // Token-form (no surrounding quotes) values pass through unchanged.
+  mt("text/html; charset=utf-8")
+  |> mimetype.parameter_of("charset")
+  |> should.equal(Some("utf-8"))
+}
+
+pub fn parse_then_to_string_then_parse_quoted_value_round_trips_test() {
+  // After this fix, the round-trip parameter value is stable —
+  // previously the value would gain literal `"` quotes on each round
+  // and `to_string` would re-emit them, so the second parse would
+  // see `"\"utf-8\""` and so on.
+  let assert Ok(mt1) = mimetype.parse("text/html; charset=\"utf-8\"")
+  let serialised = mimetype.to_string(mt1)
+  let assert Ok(mt2) = mimetype.parse(serialised)
+  mimetype.parameter_of(mt2, "charset")
+  |> should.equal(Some("utf-8"))
+}
+
+pub fn parameter_of_lone_quote_passes_through_test() {
+  // A bare `"` (length 1) is malformed per RFC 7230 — pass through
+  // unchanged so the parser stays tolerant.
+  mt("text/html; charset=\"")
+  |> mimetype.parameter_of("charset")
+  |> should.equal(Some("\""))
+}
+
+pub fn parameter_of_unmatched_leading_quote_passes_through_test() {
+  // `"utf-8` (no trailing `"`) — pass through unchanged.
+  mt("text/html; charset=\"utf-8")
+  |> mimetype.parameter_of("charset")
+  |> should.equal(Some("\"utf-8"))
+}
+
 pub fn family_predicates_use_essence_test() {
   mimetype.is_image(mt("IMAGE/PNG; version=1"))
   |> should.equal(True)

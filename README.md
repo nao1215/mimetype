@@ -29,7 +29,7 @@ the generated table keeps lookups aligned with that upstream source.
 
 This library intentionally stays focused:
 
-- It does not do deep container introspection such as distinguishing Office formats inside ZIP
+- It does perform shallow ZIP-container inspection for a small fixed allowlist: `epub`, OOXML (`docx`/`xlsx`/`pptx`), OpenDocument (`odt`/`ods`/`odp`), `jar`, and `apk`. It does not recurse arbitrarily into nested containers or inspect embedded subformats beyond those targeted signatures.
 - It does sniff `text/plain` from printable-ASCII-only payloads (the bounded WHATWG-style binary-vs-text heuristic added in #20) and recognises the UTF-8/16/32 BOM signatures, returning `text/plain; charset=<utf-X>` for the BOM cases. This is the **only** text-related sniffing — it does not detect text encodings beyond the BOM marker, and the printable-ASCII fallback emits a bare `text/plain` with no charset parameter.
 - Beyond the four BOM-derived `text/plain; charset=utf-*` signatures it does not parse, validate, or surface MIME-parameter values from the wire.
 
@@ -64,19 +64,20 @@ pub fn main() {
 
 ## Supported magic-number formats
 
-`detect/1` currently recognizes the following MIME types:
+`detect/1` currently recognizes many common MIME types, including:
 
 - Archive and container formats: `application/zip`, `application/gzip`, `application/x-bzip2`, `application/x-xz`, `application/x-7z-compressed`, `application/x-rar-compressed`, `application/vnd.ms-cab-compressed`, `application/x-tar`, `application/zstd`
 - Documents and data formats: `application/pdf`, `application/vnd.sqlite3`, `application/vnd.apache.parquet`
+- ZIP-derived document formats: `application/epub+zip`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`, `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, `application/vnd.openxmlformats-officedocument.presentationml.presentation`, `application/vnd.oasis.opendocument.text`, `application/vnd.oasis.opendocument.spreadsheet`, `application/vnd.oasis.opendocument.presentation`, `application/java-archive`, `application/vnd.android.package-archive`
 - Runtime and transport formats: `application/ogg`, `application/wasm`, `application/x-elf`
 - Audio formats: `audio/wav`, `audio/aiff`, `audio/mpeg`, `audio/flac`, `audio/midi`, `audio/mp4`
 - Image formats: `image/png`, `image/jpeg`, `image/gif`, `image/bmp`, `image/tiff`, `image/x-icon`, `image/webp`, `image/avif`, `image/heic`
 - Video formats: `video/x-msvideo`, `video/webm`, `video/quicktime`, `video/mp4`
 
 The detector is intentionally shallow: it looks only at fixed
-signatures near the start of the byte stream. Formats that require
-container introspection, such as Office documents inside ZIP, are not
-currently distinguished.
+signatures near the start of the byte stream, plus a small amount of
+targeted ZIP local-header inspection for the container formats listed
+above. It does not recurse arbitrarily into nested containers.
 
 ## Development
 

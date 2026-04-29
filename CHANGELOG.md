@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Added
+
+- Detect OpenDocument ZIP containers via their required leading
+  `mimetype` entry: `application/vnd.oasis.opendocument.text`
+  (`.odt`), `application/vnd.oasis.opendocument.spreadsheet`
+  (`.ods`), and `application/vnd.oasis.opendocument.presentation`
+  (`.odp`). This brings content-based detection into line with the
+  existing extension database and ZIP subtype hierarchy.
+
+### Documentation
+
+- README now describes the actual shallow ZIP-container inspection
+  behavior. The previous wording incorrectly implied that ZIP-based
+  Office-family formats were not distinguished at all.
+
 ## [0.7.0] - 2026-04-28
 
 ### Changed

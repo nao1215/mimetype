@@ -41,16 +41,29 @@ pub fn extension_to_mime_type(extension: String) -> String {
   // The generated db module expects already-normalized keys.
   case extension_to_mime_type_strict(extension) {
     Ok(mime_type) -> mime_type
-    Error(Nil) -> default_mime_type
+    Error(NoMatch) -> default_mime_type
+    Error(UnknownExtension(_)) -> default_mime_type
+    Error(EmptyInput) -> default_mime_type
+    Error(ReaderError(_)) -> default_mime_type
   }
 }
 
 /// Look up a MIME type from a file extension.
 ///
-/// This strict variant returns `Error(Nil)` when the normalized
-/// extension is not present in the generated database.
-pub fn extension_to_mime_type_strict(extension: String) -> Result(String, Nil) {
-  db.extension_to_mime_type(normalize_extension(extension))
+/// Returns `Error(EmptyInput)` when the input normalises to the empty
+/// string (e.g. `""`, `"."`, `"   "`). Returns
+/// `Error(UnknownExtension(ext))` when the normalised extension is not
+/// present in the generated database, carrying the lookup key so the
+/// caller can render it without re-parsing.
+pub fn extension_to_mime_type_strict(
+  extension: String,
+) -> Result(String, DetectionError(Nil)) {
+  let normalized = normalize_extension(extension)
+  use <- bool.guard(when: normalized == "", return: Error(EmptyInput))
+  case db.extension_to_mime_type(normalized) {
+    Ok(mime_type) -> Ok(mime_type)
+    Error(Nil) -> Error(UnknownExtension(normalized))
+  }
 }
 
 /// Return all known extensions for a MIME type.
@@ -164,12 +177,20 @@ pub fn is_xml_based(mime: String) -> Bool {
 ///      multi-byte UTF-8 sequences, `us-ascii` for input that is
 ///      entirely 0x00–0x7F.
 ///
-/// Returns `Error(Nil)` for inputs whose encoding cannot be determined
+/// Returns `Error(EmptyInput)` for the zero-byte `BitArray`, and
+/// `Error(NoMatch)` for inputs whose encoding cannot be determined
 /// (typically non-UTF-8 high-byte content like Latin-1 or Shift_JIS
 /// without an in-document declaration). Charset names are returned in
 /// lowercase, matching the convention used by IANA's charset registry.
-pub fn charset_of(bytes: BitArray) -> Result(String, Nil) {
-  charset_internal.detect(bytes)
+pub fn charset_of(bytes: BitArray) -> Result(String, DetectionError(Nil)) {
+  use <- bool.guard(
+    when: bit_array.byte_size(bytes) == 0,
+    return: Error(EmptyInput),
+  )
+  case charset_internal.detect(bytes) {
+    Ok(charset) -> Ok(charset)
+    Error(Nil) -> Error(NoMatch)
+  }
 }
 
 /// Return the chain of ancestors of `mime`, ordered from immediate
@@ -193,27 +214,39 @@ fn ancestors_loop(mime: String, acc: List(String)) -> List(String) {
 
 /// Look up a parameter value from a MIME type string.
 ///
-/// Parameter names are matched case-insensitively. This returns
-/// `Error(Nil)` when the key is empty or the parameter is missing.
-pub fn parameter(mime_type: String, key: String) -> Result(String, Nil) {
+/// Parameter names are matched case-insensitively. Returns
+/// `Error(EmptyInput)` when the key normalises to empty (e.g. `""`,
+/// `"   "`) and `Error(NoMatch)` when the MIME type carries no
+/// parameters or none match the requested key.
+pub fn parameter(
+  mime_type: String,
+  key: String,
+) -> Result(String, DetectionError(Nil)) {
   let requested = key |> string.trim |> string.lowercase
 
-  use <- bool.guard(when: requested == "", return: Error(Nil))
+  use <- bool.guard(when: requested == "", return: Error(EmptyInput))
 
   case string.split(mime_type, ";") {
-    [] -> Error(Nil)
-    [_] -> Error(Nil)
-    [_essence, ..parameters] -> find_parameter(parameters, requested)
+    [] -> Error(NoMatch)
+    [_] -> Error(NoMatch)
+    [_essence, ..parameters] ->
+      case find_parameter(parameters, requested) {
+        Ok(value) -> Ok(value)
+        Error(Nil) -> Error(NoMatch)
+      }
   }
 }
 
 /// Return the `charset` parameter from a MIME type string.
 ///
-/// Charset values are normalized to lowercase for convenience.
-pub fn charset(mime_type: String) -> Result(String, Nil) {
+/// Charset values are normalized to lowercase for convenience. The
+/// underlying `parameter/2` lookup decides between `EmptyInput` (the
+/// internal `"charset"` key never normalises to empty, so this case
+/// does not arise in practice) and `NoMatch` (no `charset=` found).
+pub fn charset(mime_type: String) -> Result(String, DetectionError(Nil)) {
   case parameter(mime_type, "charset") {
     Ok(value) -> Ok(string.lowercase(value))
-    Error(Nil) -> Error(Nil)
+    Error(reason) -> Error(reason)
   }
 }
 
@@ -226,19 +259,26 @@ pub fn charset(mime_type: String) -> Result(String, Nil) {
 pub fn filename_to_mime_type(path: String) -> String {
   case filename_to_mime_type_strict(path) {
     Ok(mime_type) -> mime_type
-    Error(Nil) -> default_mime_type
+    Error(NoMatch) -> default_mime_type
+    Error(UnknownExtension(_)) -> default_mime_type
+    Error(EmptyInput) -> default_mime_type
+    Error(ReaderError(_)) -> default_mime_type
   }
 }
 
 /// Look up a MIME type from the last extension component of a path or
 /// filename.
 ///
-/// This strict variant returns `Error(Nil)` when the path does not
-/// contain a usable extension or the extension is unknown.
-pub fn filename_to_mime_type_strict(path: String) -> Result(String, Nil) {
+/// Returns `Error(EmptyInput)` when the path does not contain a usable
+/// extension (e.g. `"README"`, `".gitignore"`, `""`). Returns
+/// `Error(UnknownExtension(ext))` when the path has an extension but
+/// the normalised extension is not in the database.
+pub fn filename_to_mime_type_strict(
+  path: String,
+) -> Result(String, DetectionError(Nil)) {
   case extension_from_filename(path) {
     Some(extension) -> extension_to_mime_type_strict(extension)
-    None -> Error(Nil)
+    None -> Error(EmptyInput)
   }
 }
 
@@ -264,21 +304,22 @@ pub fn filename_to_mime_type_strict(path: String) -> Result(String, Nil) {
 /// bytes — including the empty `BitArray`. The fallback is silent: a
 /// caller that needs to distinguish "no signature matched" from
 /// "signature matched but produced `application/octet-stream`" should
-/// use `detect_strict/1`, which returns `Error(Nil)` for the
-/// no-match case.
+/// use `detect_strict/1`, which returns `Error(EmptyInput)` for the
+/// zero-byte input and `Error(NoMatch)` for the no-match case.
 pub fn detect(bytes: BitArray) -> String {
   detect_with_limit(bytes, default_detection_limit)
 }
 
 /// Detect a MIME type from the leading bytes of a blob.
 ///
-/// This strict variant returns `Error(Nil)` when no supported
-/// magic-number signature matches the input (including the empty
-/// `BitArray`), so the caller can distinguish "no signature found"
-/// from "signature matched". Prefer this variant when the
-/// `application/octet-stream` fallback would be ambiguous; use
-/// `detect/1` when an unconditional `String` is more convenient.
-pub fn detect_strict(bytes: BitArray) -> Result(String, Nil) {
+/// Returns `Error(EmptyInput)` for the zero-byte `BitArray`, and
+/// `Error(NoMatch)` when no supported magic-number signature matches
+/// non-empty input — letting the caller distinguish "you didn't give
+/// us anything" from "we looked and didn't find a match". Prefer this
+/// variant when the `application/octet-stream` fallback would be
+/// ambiguous; use `detect/1` when an unconditional `String` is more
+/// convenient.
+pub fn detect_strict(bytes: BitArray) -> Result(String, DetectionError(Nil)) {
   detect_with_limit_strict(bytes, default_detection_limit)
 }
 
@@ -291,19 +332,30 @@ pub fn detect_strict(bytes: BitArray) -> Result(String, Nil) {
 pub fn detect_with_limit(bytes: BitArray, limit: Int) -> String {
   case detect_with_limit_strict(bytes, limit) {
     Ok(mime_type) -> mime_type
-    Error(Nil) -> default_mime_type
+    Error(NoMatch) -> default_mime_type
+    Error(UnknownExtension(_)) -> default_mime_type
+    Error(EmptyInput) -> default_mime_type
+    Error(ReaderError(_)) -> default_mime_type
   }
 }
 
 /// Detect a MIME type from at most `limit` leading bytes.
 ///
-/// Strict variant; returns `Error(Nil)` when no supported signature
-/// matches within the limit.
+/// Strict variant; returns `Error(EmptyInput)` for the zero-byte
+/// `BitArray` and `Error(NoMatch)` when no supported signature matches
+/// within the limit.
 pub fn detect_with_limit_strict(
   bytes: BitArray,
   limit: Int,
-) -> Result(String, Nil) {
-  result_from_option(magic.detect(truncate_to_limit(bytes, limit)))
+) -> Result(String, DetectionError(Nil)) {
+  use <- bool.guard(
+    when: bit_array.byte_size(bytes) == 0,
+    return: Error(EmptyInput),
+  )
+  case magic.detect(truncate_to_limit(bytes, limit)) {
+    Some(mime_type) -> Ok(mime_type)
+    None -> Error(NoMatch)
+  }
 }
 
 /// Detect a MIME type from a genuine binary or structural signature
@@ -313,16 +365,19 @@ pub fn detect_with_limit_strict(
 /// otherwise classifies every plain-ASCII payload as `text/plain`.
 /// Returns `Ok(mime_type)` for byte magic numbers (PNG, JPEG, ZIP,
 /// `text/plain; charset=utf-*` BOMs, ...) and structural sniffs that
-/// inspect bytes (JSON, HTML, XML, SVG). Returns `Error(Nil)` for
-/// arbitrary printable-ASCII text — letting the caller defer to a
-/// stronger out-of-band hint such as a filename extension.
+/// inspect bytes (JSON, HTML, XML, SVG). Returns `Error(EmptyInput)`
+/// for the zero-byte `BitArray` and `Error(NoMatch)` for arbitrary
+/// printable-ASCII text — letting the caller defer to a stronger
+/// out-of-band hint such as a filename extension.
 ///
 /// This is the building block behind `detect_with_filename` /
 /// `detect_with_extension`: a `.csv` filename is a stronger signal
 /// than the byte-level fact "this is printable ASCII", so those
 /// helpers consult the filename hint when the only thing the byte
 /// side could say was `text/plain`.
-pub fn detect_signature_only(bytes: BitArray) -> Result(String, Nil) {
+pub fn detect_signature_only(
+  bytes: BitArray,
+) -> Result(String, DetectionError(Nil)) {
   detect_signature_only_with_limit(bytes, default_detection_limit)
 }
 
@@ -330,8 +385,15 @@ pub fn detect_signature_only(bytes: BitArray) -> Result(String, Nil) {
 pub fn detect_signature_only_with_limit(
   bytes: BitArray,
   limit: Int,
-) -> Result(String, Nil) {
-  result_from_option(magic.detect_signature(truncate_to_limit(bytes, limit)))
+) -> Result(String, DetectionError(Nil)) {
+  use <- bool.guard(
+    when: bit_array.byte_size(bytes) == 0,
+    return: Error(EmptyInput),
+  )
+  case magic.detect_signature(truncate_to_limit(bytes, limit)) {
+    Some(mime_type) -> Ok(mime_type)
+    None -> Error(NoMatch)
+  }
 }
 
 fn truncate_to_limit(bytes: BitArray, limit: Int) -> BitArray {
@@ -355,17 +417,30 @@ fn truncate_to_limit(bytes: BitArray, limit: Int) -> BitArray {
 pub type Reader(read_error) =
   fn(Int) -> Result(BitArray, read_error)
 
-/// Reasons `detect_reader_strict` can return `Error(_)`.
+/// Reasons the strict detection family can return `Error(_)`.
 ///
 /// The error is structured so callers can distinguish "no signature
 /// matched" from "the reader itself failed before any bytes could be
-/// inspected" — useful for HTTP upload pipelines that want to render
-/// "couldn't read the file" differently from "we don't recognise this
-/// format". `read_error` is the type the supplied `Reader` produces;
-/// it flows through unchanged when the reader fails.
+/// inspected" from "the supplied filename / extension is not in the
+/// database" from "the input was empty" — useful for HTTP upload
+/// pipelines that want to render each case differently. `read_error`
+/// is the type the supplied `Reader` produces; it flows through
+/// unchanged when the reader fails. Strict functions that do not take
+/// a reader use `DetectionError(Nil)`.
 pub type DetectionError(read_error) {
-  /// No signature matched the bytes that were inspected.
+  /// No signature matched the bytes that were inspected, and no
+  /// filename / extension hint resolved.
   NoMatch
+  /// The supplied filename or extension is not present in the MIME
+  /// database. Carries the normalised extension so callers can render
+  /// "we don't recognise the `.xyz` extension" without re-parsing.
+  UnknownExtension(String)
+  /// The input was empty: a zero-byte `BitArray`, an empty extension
+  /// string, or a filename whose path component carries no usable
+  /// extension. Distinguished from `NoMatch` so callers can render
+  /// "you didn't give us anything to look at" differently from "we
+  /// looked and didn't find a match".
+  EmptyInput
   /// The reader returned an error before any bytes could be inspected.
   ReaderError(read_error)
 }
@@ -379,6 +454,8 @@ pub fn detect_reader(read: Reader(read_error), limit: Int) -> String {
   case detect_reader_strict(read, limit) {
     Ok(mime_type) -> mime_type
     Error(NoMatch) -> default_mime_type
+    Error(UnknownExtension(_)) -> default_mime_type
+    Error(EmptyInput) -> default_mime_type
     Error(ReaderError(_)) -> default_mime_type
   }
 }
@@ -403,7 +480,10 @@ pub fn detect_reader_strict(
     Ok(bytes) ->
       case detect_with_limit_strict(bytes, safe_limit) {
         Ok(mime_type) -> Ok(mime_type)
-        Error(Nil) -> Error(NoMatch)
+        Error(EmptyInput) -> Error(EmptyInput)
+        Error(NoMatch) -> Error(NoMatch)
+        Error(UnknownExtension(extension)) -> Error(UnknownExtension(extension))
+        Error(ReaderError(_)) -> Error(NoMatch)
       }
     Error(read_error) -> Error(ReaderError(read_error))
   }
@@ -423,28 +503,28 @@ pub fn detect_reader_strict(
 pub fn detect_with_extension(bytes: BitArray, extension: String) -> String {
   case detect_with_extension_strict(bytes, extension) {
     Ok(mime_type) -> mime_type
-    Error(Nil) -> default_mime_type
+    Error(NoMatch) -> default_mime_type
+    Error(UnknownExtension(_)) -> default_mime_type
+    Error(EmptyInput) -> default_mime_type
+    Error(ReaderError(_)) -> default_mime_type
   }
 }
 
 /// Detect a MIME type from bytes, consulting an explicit extension
 /// hint when the byte signature alone is not specific enough.
 ///
-/// This strict variant returns `Error(Nil)` only when neither the byte
-/// signature, the normalised extension, nor the printable-ASCII
-/// fallback succeed.
+/// Returns `Error(EmptyInput)` only when both the bytes and the
+/// extension carry no information (zero-byte input *and* an
+/// extension that normalises to empty). Returns `Error(NoMatch)`
+/// when neither the byte signature, the normalised extension, nor
+/// the printable-ASCII fallback succeed.
 pub fn detect_with_extension_strict(
   bytes: BitArray,
   extension: String,
-) -> Result(String, Nil) {
-  case detect_signature_only(bytes) {
-    Ok(mime_type) -> Ok(mime_type)
-    Error(Nil) ->
-      case extension_to_mime_type_strict(extension) {
-        Ok(mime_type) -> Ok(mime_type)
-        Error(Nil) -> detect_strict(bytes)
-      }
-  }
+) -> Result(String, DetectionError(Nil)) {
+  detect_signature_only(bytes)
+  |> result.lazy_or(fn() { extension_to_mime_type_strict(extension) })
+  |> result.lazy_or(fn() { detect_strict(bytes) })
 }
 
 /// Detect a MIME type from bytes, consulting the filename extension
@@ -461,28 +541,27 @@ pub fn detect_with_extension_strict(
 pub fn detect_with_filename(bytes: BitArray, filename: String) -> String {
   case detect_with_filename_strict(bytes, filename) {
     Ok(mime_type) -> mime_type
-    Error(Nil) -> default_mime_type
+    Error(NoMatch) -> default_mime_type
+    Error(UnknownExtension(_)) -> default_mime_type
+    Error(EmptyInput) -> default_mime_type
+    Error(ReaderError(_)) -> default_mime_type
   }
 }
 
 /// Detect a MIME type from bytes, consulting the filename extension
 /// when the byte signature alone is not specific enough.
 ///
-/// This strict variant returns `Error(Nil)` only when neither the byte
-/// signature, the filename extension, nor the printable-ASCII fallback
-/// succeed.
+/// Returns `Error(EmptyInput)` when the bytes are empty and the
+/// filename has no usable extension. Returns `Error(NoMatch)` when
+/// neither the byte signature, the filename extension, nor the
+/// printable-ASCII fallback succeed.
 pub fn detect_with_filename_strict(
   bytes: BitArray,
   filename: String,
-) -> Result(String, Nil) {
-  case detect_signature_only(bytes) {
-    Ok(mime_type) -> Ok(mime_type)
-    Error(Nil) ->
-      case filename_to_mime_type_strict(filename) {
-        Ok(mime_type) -> Ok(mime_type)
-        Error(Nil) -> detect_strict(bytes)
-      }
-  }
+) -> Result(String, DetectionError(Nil)) {
+  detect_signature_only(bytes)
+  |> result.lazy_or(fn() { filename_to_mime_type_strict(filename) })
+  |> result.lazy_or(fn() { detect_strict(bytes) })
 }
 
 fn normalize_extension(extension: String) -> String {
@@ -547,11 +626,4 @@ fn find_parameter(
       _ -> Error(Nil)
     }
   })
-}
-
-fn result_from_option(value: Option(a)) -> Result(a, Nil) {
-  case value {
-    Some(inner) -> Ok(inner)
-    None -> Error(Nil)
-  }
 }

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.9.0] - 2026-04-29
+
 ### Fixed
 
 - **`parse`** now strips the surrounding `"` delimiters from quoted-string

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.8.0] - 2026-04-29
+
 ### Added
 
 - Detect OpenDocument ZIP containers via their required leading

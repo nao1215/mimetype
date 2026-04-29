@@ -10,19 +10,66 @@
   (`.ods`), and `application/vnd.oasis.opendocument.presentation`
   (`.odp`). This brings content-based detection into line with the
   existing extension database and ZIP subtype hierarchy.
+- **`pub opaque type MimeType`**: a normalised, validated MIME type
+  value carrying both the essence (`type/subtype`) and the parsed
+  parameter list. All detection / lookup helpers now return
+  `MimeType` (or `Result(MimeType, _)`); predicates and accessors
+  operate on `MimeType` rather than ad-hoc strings. Construction:
+    - `parse(String) -> Result(MimeType, ParseError)` — wire-format
+      parser. Returns `Error(EmptyMimeType)` for empty input and
+      `Error(InvalidMimeType(original))` for malformed essences.
+    - `to_string(MimeType) -> String` — serialise back to the
+      wire format (round-trippable through `parse`).
+  Accessors:
+    - `essence_of(MimeType) -> String`
+    - `parameter_of(MimeType, String) -> Option(String)`
+    - `charset_of_type(MimeType) -> Option(String)`
+- **`ParseError`** type, with `EmptyMimeType` and
+  `InvalidMimeType(String)` variants, returned by `parse/1`.
 
 ### Changed
 
-- **Strict family (BREAKING)**: the remaining ten strict-family
-  functions (`detect_strict`, `detect_with_limit_strict`,
+- **API-wide `String` → `MimeType` (BREAKING)**: every detection
+  and lookup function now returns `MimeType` (or
+  `Result(MimeType, DetectionError(_))`) instead of a bare
+  `String`. Predicates and ancestor helpers take `MimeType`.
+  Affected functions:
+    - `detect`, `detect_strict`
+    - `detect_with_limit`, `detect_with_limit_strict`
+    - `detect_signature_only`, `detect_signature_only_with_limit`
+    - `detect_with_extension`, `detect_with_extension_strict`
+    - `detect_with_filename`, `detect_with_filename_strict`
+    - `detect_reader`, `detect_reader_strict`
+    - `extension_to_mime_type`, `extension_to_mime_type_strict`
+    - `filename_to_mime_type`, `filename_to_mime_type_strict`
+    - `mime_type_to_extensions`, `mime_type_to_extensions_strict`
+      (argument changes from `String` to `MimeType`; return list
+      stays `List(String)`)
+    - `is_image`, `is_text`, `is_audio`, `is_video`
+    - `is_a` (both arguments), `is_zip_based`, `is_xml_based`
+    - `ancestors` (argument and list element type both `MimeType`)
+  `default_mime_type` is now a `MimeType` constant rather than a
+  `String`. Migration:
+    - Reading: pipe results through `to_string` (for the wire
+      form) or `essence_of` (for `type/subtype`). Predicates
+      compose directly on the new value, no extraction needed.
+    - Constructing arguments: replace bare strings with
+      `parse(s)` (and `result.unwrap` / `let assert` if you
+      know the input is well-formed). For
+      `mime_type_to_extensions`, that's the most common
+      migration site.
+  `charset_of(BitArray)` continues to return
+  `Result(String, DetectionError(Nil))` — its result is a charset
+  name, not a MIME type. Closes #62. (#62)
+- **Strict family (BREAKING)**: the ten strict-family functions
+  (`detect_strict`, `detect_with_limit_strict`,
   `detect_signature_only`, `detect_signature_only_with_limit`,
   `detect_with_extension_strict`, `detect_with_filename_strict`,
   `extension_to_mime_type_strict`, `filename_to_mime_type_strict`,
-  `parameter`, `charset`, `charset_of`) now return
-  `Result(_, DetectionError(Nil))` instead of `Result(_, Nil)`,
-  matching the shape `detect_reader_strict` already used in 0.7.0.
-  `DetectionError` gains two new variants alongside the existing
-  `NoMatch` and `ReaderError(_)`:
+  `charset_of`) now return `Result(_, DetectionError(Nil))` instead
+  of `Result(_, Nil)`, matching the shape `detect_reader_strict`
+  already used in 0.7.0. `DetectionError` gains two new variants
+  alongside the existing `NoMatch` and `ReaderError(_)`:
     - `EmptyInput` — the input was a zero-byte `BitArray`, an empty
       extension string, or a path with no usable extension.
     - `UnknownExtension(String)` — the supplied filename / extension
@@ -33,13 +80,7 @@
   detection failures, `Error(EmptyInput)` for empty inputs, and
   `Error(UnknownExtension(_))` for the extension-lookup failures of
   `extension_to_mime_type_strict` / `filename_to_mime_type_strict`).
-  The lenient (`String`-returning) wrappers — `extension_to_mime_type`,
-  `filename_to_mime_type`, `detect`, `detect_with_limit`,
-  `detect_reader`, `detect_with_extension`, `detect_with_filename` —
-  still return a single `String` and behave identically to 0.7.0.
-  `mime_type_to_extensions_strict` is intentionally out of scope for
-  #61 and continues to return `Result(_, Nil)`. Closes the rest of
-  #61. (#61)
+  Closes the rest of #61. (#61)
 - **`charset_of` (BREAKING, behaviour change)**: now returns
   `Error(EmptyInput)` for the zero-byte `BitArray`. Previously the
   internal pure-ASCII fallback caused `charset_of(<<>>)` to return
@@ -48,6 +89,19 @@
   be determined now return `Error(NoMatch)` (renamed from
   `Error(Nil)`).
 
+### Removed
+
+- **`essence(String) -> String` (BREAKING)** — replaced by
+  `essence_of(MimeType) -> String`. Migration: parse the string
+  first via `parse/1`, then call `essence_of` on the result.
+- **`parameter(String, String) -> Result(String, _)` (BREAKING)** —
+  replaced by `parameter_of(MimeType, String) -> Option(String)`.
+  The error shape collapses from `DetectionError` to `Option`
+  because `parse/1` now front-loads the validation.
+- **`charset(String) -> Result(String, _)` (BREAKING)** — replaced
+  by `charset_of_type(MimeType) -> Option(String)`. Same migration
+  as `parameter`.
+
 ### Documentation
 
 - README now describes the actual shallow ZIP-container inspection
@@ -55,6 +109,9 @@
   Office-family formats were not distinguished at all.
 - README's `detect_strict(<<>>)` example shows the new
   `Error(EmptyInput)` shape.
+- README usage block rewritten to show the `MimeType` workflow:
+  `to_string` for serialisation, `parse` for construction,
+  `essence_of` / `is_image` / `charset_of_type` for inspection.
 
 ## [0.7.0] - 2026-04-28
 

@@ -35,30 +35,47 @@ This library intentionally stays focused:
 
 ## Usage
 
+Detection / lookup helpers return an opaque `MimeType` value. Use
+`mimetype.to_string` to serialise one for an HTTP `Content-Type`
+header; use `mimetype.parse` to construct one from a wire-format
+string. Inspect with `essence_of`, `parameter_of`, `charset_of_type`,
+`is_image`, `is_a`, and the rest of the predicate / accessor family.
+
 ```gleam
+import gleam/option.{Some}
 import mimetype
 
 pub fn main() {
   mimetype.extension_to_mime_type(".json")
+  |> mimetype.to_string
   // -> "application/json"
 
-  mimetype.mime_type_to_extensions("image/jpeg")
+  let assert Ok(jpeg) = mimetype.parse("image/jpeg")
+  mimetype.mime_type_to_extensions(jpeg)
   // -> ["jpg", "jpeg", "jpe"]
 
   mimetype.filename_to_mime_type("photo.JPG")
+  |> mimetype.to_string
   // -> "image/jpeg"
 
   mimetype.detect(<<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>)
-  // -> "image/png"
+  |> mimetype.is_image
+  // -> True
 
   mimetype.detect(<<>>)
+  |> mimetype.to_string
   // -> "application/octet-stream"  (silent fallback for unknown / empty input)
 
   mimetype.detect_strict(<<>>)
   // -> Error(EmptyInput)  (loud variant — empty input vs. NoMatch)
 
   mimetype.detect_with_filename(<<0, 1, 2, 3>>, "report.csv")
+  |> mimetype.essence_of
   // -> "text/csv"
+
+  let assert Ok(html) = mimetype.parse("text/html; charset=utf-8")
+  mimetype.charset_of_type(html)
+  // -> Some("utf-8")
 }
 ```
 

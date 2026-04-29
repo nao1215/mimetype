@@ -11,11 +11,50 @@
   (`.odp`). This brings content-based detection into line with the
   existing extension database and ZIP subtype hierarchy.
 
+### Changed
+
+- **Strict family (BREAKING)**: the remaining ten strict-family
+  functions (`detect_strict`, `detect_with_limit_strict`,
+  `detect_signature_only`, `detect_signature_only_with_limit`,
+  `detect_with_extension_strict`, `detect_with_filename_strict`,
+  `extension_to_mime_type_strict`, `filename_to_mime_type_strict`,
+  `parameter`, `charset`, `charset_of`) now return
+  `Result(_, DetectionError(Nil))` instead of `Result(_, Nil)`,
+  matching the shape `detect_reader_strict` already used in 0.7.0.
+  `DetectionError` gains two new variants alongside the existing
+  `NoMatch` and `ReaderError(_)`:
+    - `EmptyInput` — the input was a zero-byte `BitArray`, an empty
+      extension string, or a path with no usable extension.
+    - `UnknownExtension(String)` — the supplied filename / extension
+      is not in the MIME database; the normalised lookup key is
+      carried so callers can render it without re-parsing.
+  Migration: callers that pattern-matched `Error(Nil)` switch to
+  matching the relevant variant (often `Error(NoMatch)` for
+  detection failures, `Error(EmptyInput)` for empty inputs, and
+  `Error(UnknownExtension(_))` for the extension-lookup failures of
+  `extension_to_mime_type_strict` / `filename_to_mime_type_strict`).
+  The lenient (`String`-returning) wrappers — `extension_to_mime_type`,
+  `filename_to_mime_type`, `detect`, `detect_with_limit`,
+  `detect_reader`, `detect_with_extension`, `detect_with_filename` —
+  still return a single `String` and behave identically to 0.7.0.
+  `mime_type_to_extensions_strict` is intentionally out of scope for
+  #61 and continues to return `Result(_, Nil)`. Closes the rest of
+  #61. (#61)
+- **`charset_of` (BREAKING, behaviour change)**: now returns
+  `Error(EmptyInput)` for the zero-byte `BitArray`. Previously the
+  internal pure-ASCII fallback caused `charset_of(<<>>)` to return
+  `Ok("us-ascii")`, which was surprising — "no bytes" is not
+  evidence of an encoding. Non-empty inputs whose encoding cannot
+  be determined now return `Error(NoMatch)` (renamed from
+  `Error(Nil)`).
+
 ### Documentation
 
 - README now describes the actual shallow ZIP-container inspection
   behavior. The previous wording incorrectly implied that ZIP-based
   Office-family formats were not distinguished at all.
+- README's `detect_strict(<<>>)` example shows the new
+  `Error(EmptyInput)` shape.
 
 ## [0.7.0] - 2026-04-28
 

@@ -81,7 +81,17 @@ pub fn extension_to_mime_type_strict_returns_ok_for_known_extension_test() {
 
 pub fn extension_to_mime_type_strict_returns_error_for_unknown_extension_test() {
   mimetype.extension_to_mime_type_strict("totally-unknown-ext")
-  |> should.equal(Error(Nil))
+  |> should.equal(Error(mimetype.UnknownExtension("totally-unknown-ext")))
+}
+
+pub fn extension_to_mime_type_strict_returns_empty_input_for_blank_test() {
+  mimetype.extension_to_mime_type_strict("")
+  |> should.equal(Error(mimetype.EmptyInput))
+}
+
+pub fn extension_to_mime_type_strict_returns_empty_input_for_dot_only_test() {
+  mimetype.extension_to_mime_type_strict(".")
+  |> should.equal(Error(mimetype.EmptyInput))
 }
 
 pub fn mime_type_to_extensions_returns_all_known_extensions_test() {
@@ -162,9 +172,14 @@ pub fn parameter_matches_case_insensitively_test() {
   |> should.equal(Ok("UTF-8"))
 }
 
-pub fn parameter_returns_error_for_missing_key_test() {
+pub fn parameter_returns_no_match_for_missing_key_test() {
   mimetype.parameter("text/html; charset=UTF-8", "boundary")
-  |> should.equal(Error(Nil))
+  |> should.equal(Error(mimetype.NoMatch))
+}
+
+pub fn parameter_returns_empty_input_for_blank_key_test() {
+  mimetype.parameter("text/html; charset=UTF-8", "")
+  |> should.equal(Error(mimetype.EmptyInput))
 }
 
 pub fn charset_returns_lowercased_value_test() {
@@ -172,9 +187,9 @@ pub fn charset_returns_lowercased_value_test() {
   |> should.equal(Ok("utf-8"))
 }
 
-pub fn charset_returns_error_when_missing_test() {
+pub fn charset_returns_no_match_when_missing_test() {
   mimetype.charset("text/html")
-  |> should.equal(Error(Nil))
+  |> should.equal(Error(mimetype.NoMatch))
 }
 
 pub fn family_predicates_use_essence_test() {
@@ -225,9 +240,14 @@ pub fn filename_to_mime_type_strict_returns_ok_for_known_filename_test() {
   |> should.equal(Ok("application/pdf"))
 }
 
-pub fn filename_to_mime_type_strict_returns_error_without_extension_test() {
+pub fn filename_to_mime_type_strict_returns_empty_input_without_extension_test() {
   mimetype.filename_to_mime_type_strict("README")
-  |> should.equal(Error(Nil))
+  |> should.equal(Error(mimetype.EmptyInput))
+}
+
+pub fn filename_to_mime_type_strict_returns_unknown_extension_test() {
+  mimetype.filename_to_mime_type_strict("notes.totally-unknown-ext")
+  |> should.equal(Error(mimetype.UnknownExtension("totally-unknown-ext")))
 }
 
 pub fn filename_to_mime_type_uses_last_extension_test() {
@@ -326,9 +346,16 @@ pub fn detect_strict_returns_ok_for_known_signature_test() {
   |> should.equal(Ok("image/png"))
 }
 
-pub fn detect_strict_returns_error_for_unknown_signature_test() {
+pub fn detect_strict_returns_empty_input_for_zero_bytes_test() {
   mimetype.detect_strict(<<>>)
-  |> should.equal(Error(Nil))
+  |> should.equal(Error(mimetype.EmptyInput))
+}
+
+pub fn detect_strict_returns_no_match_for_unknown_signature_test() {
+  // Single 0xFF byte — not empty, but no signature matches and the
+  // printable-ASCII fallback rejects it.
+  mimetype.detect_strict(<<0xFF>>)
+  |> should.equal(Error(mimetype.NoMatch))
 }
 
 pub fn detect_archive_and_compression_formats_test() {
@@ -737,9 +764,9 @@ pub fn detect_with_extension_strict_falls_back_to_extension_test() {
   |> should.equal(Ok("text/csv"))
 }
 
-pub fn detect_with_extension_strict_returns_error_when_both_are_unknown_test() {
+pub fn detect_with_extension_strict_returns_no_match_when_both_are_unknown_test() {
   mimetype.detect_with_extension_strict(<<1, 2, 3, 4>>, "totally-unknown-ext")
-  |> should.equal(Error(Nil))
+  |> should.equal(Error(mimetype.NoMatch))
 }
 
 pub fn detect_with_extension_normalizes_leading_dot_and_case_test() {
@@ -762,9 +789,9 @@ pub fn detect_with_filename_strict_falls_back_to_filename_test() {
   |> should.equal(Ok("text/csv"))
 }
 
-pub fn detect_with_filename_strict_returns_error_when_both_are_unknown_test() {
+pub fn detect_with_filename_strict_returns_no_match_when_both_are_unknown_test() {
   mimetype.detect_with_filename_strict(<<1, 2, 3, 4>>, "README")
-  |> should.equal(Error(Nil))
+  |> should.equal(Error(mimetype.NoMatch))
 }
 
 pub fn detect_with_filename_prefers_magic_over_extension_test() {
@@ -832,21 +859,21 @@ pub fn detect_signature_only_returns_ok_for_bom_tagged_text_test() {
   |> should.equal(Ok("text/plain; charset=utf-8"))
 }
 
-pub fn detect_signature_only_returns_error_for_printable_ascii_test() {
+pub fn detect_signature_only_returns_no_match_for_printable_ascii_test() {
   // The whole point of this helper: plain printable ASCII is *not*
   // a signature match here.
   mimetype.detect_signature_only(<<"plain text\n":utf8>>)
-  |> should.equal(Error(Nil))
+  |> should.equal(Error(mimetype.NoMatch))
 }
 
-pub fn detect_signature_only_returns_error_for_empty_test() {
+pub fn detect_signature_only_returns_empty_input_for_empty_test() {
   mimetype.detect_signature_only(<<>>)
-  |> should.equal(Error(Nil))
+  |> should.equal(Error(mimetype.EmptyInput))
 }
 
-pub fn detect_signature_only_returns_error_for_unknown_binary_test() {
+pub fn detect_signature_only_returns_no_match_for_unknown_binary_test() {
   mimetype.detect_signature_only(<<1, 2, 3, 4>>)
-  |> should.equal(Error(Nil))
+  |> should.equal(Error(mimetype.NoMatch))
 }
 
 pub fn detect_json_empty_object_test() {
@@ -1538,10 +1565,10 @@ pub fn detect_with_limit_strict_returns_ok_test() {
   |> should.equal(Ok("image/png"))
 }
 
-pub fn detect_with_limit_strict_returns_error_when_below_offset_test() {
+pub fn detect_with_limit_strict_returns_no_match_when_below_offset_test() {
   let bytes = <<0:size({ 257 * 8 }), 0x75, 0x73, 0x74, 0x61, 0x72, 0:size(64)>>
   mimetype.detect_with_limit_strict(bytes, 100)
-  |> should.equal(Error(Nil))
+  |> should.equal(Error(mimetype.NoMatch))
 }
 
 pub fn detect_reader_returns_same_as_detect_test() {
@@ -1762,18 +1789,22 @@ pub fn charset_of_html_with_utf8_body_no_meta_test() {
   |> should.equal(Ok("utf-8"))
 }
 
-pub fn charset_of_invalid_utf8_returns_error_test() {
+pub fn charset_of_invalid_utf8_returns_no_match_test() {
   // 0xC0 0x20 — invalid UTF-8 (0xC0 is an over-long encoding lead byte that
   // cannot be followed by 0x20 in valid UTF-8).
   mimetype.charset_of(<<0x48, 0x69, 0xC0, 0x20>>)
-  |> should.equal(Error(Nil))
+  |> should.equal(Error(mimetype.NoMatch))
+}
+
+pub fn charset_of_empty_returns_empty_input_test() {
+  mimetype.charset_of(<<>>)
+  |> should.equal(Error(mimetype.EmptyInput))
 }
 
 pub fn charset_of_truncated_meta_does_not_false_positive_test() {
-  // <meta charset="u — incomplete attribute, no closing quote. Returns
-  // Error(Nil) because the quoted-value reader can't find the closing
-  // quote and the UTF-8 fallback also rejects the high-byte-free input.
-  // Actually all-ASCII input falls through to us-ascii.
+  // <meta charset="u — incomplete attribute, no closing quote. The
+  // quoted-value reader can't find the closing quote, but all-ASCII
+  // input still falls through to us-ascii via the UTF-8 fallback.
   mimetype.charset_of(<<"<meta charset=\"u":utf8>>)
   |> should.equal(Ok("us-ascii"))
 }
@@ -1796,11 +1827,4 @@ pub fn charset_of_utf32_le_bom_test() {
 pub fn charset_of_utf32_be_bom_test() {
   mimetype.charset_of(<<0x00, 0x00, 0xFE, 0xFF, 0x00, 0x00, 0x00, 0x48>>)
   |> should.equal(Ok("utf-32be"))
-}
-
-pub fn charset_of_empty_returns_pure_ascii_test() {
-  // Empty bytes → PureAscii (no multi-byte seen). Caller can treat this
-  // as "no content" if they prefer.
-  mimetype.charset_of(<<>>)
-  |> should.equal(Ok("us-ascii"))
 }

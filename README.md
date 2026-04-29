@@ -55,7 +55,7 @@ pub fn main() {
   // -> "application/octet-stream"  (silent fallback for unknown / empty input)
 
   mimetype.detect_strict(<<>>)
-  // -> Error(Nil)  (loud variant — distinguishes "no signature" from a match)
+  // -> Error(EmptyInput)  (loud variant — empty input vs. NoMatch)
 
   mimetype.detect_with_filename(<<0, 1, 2, 3>>, "report.csv")
   // -> "text/csv"

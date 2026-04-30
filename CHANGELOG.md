@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.10.0] - 2026-04-30
+
 ### Added
 
 - **automation**: scheduled `Refresh mime-db` workflow

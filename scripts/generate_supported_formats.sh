@@ -37,8 +37,8 @@ fi
 # Matches "type/subtype" inside double quotes for the six top-level
 # media types we currently emit.
 extract_mime_types() {
-  grep -oE '"(application|audio|video|image|text|font)/[a-zA-Z0-9.+;=_ -]+"' \
-    "$MAGIC" | sort -u | sed -e 's/^"//' -e 's/"$//'
+  LC_ALL=C grep -oE '"(application|audio|video|image|text|font)/[a-zA-Z0-9.+;=_ -]+"' \
+    "$MAGIC" | LC_ALL=C sort -u | sed -e 's/^"//' -e 's/"$//'
 }
 
 # Print one bullet per MIME type for a given top-level family.

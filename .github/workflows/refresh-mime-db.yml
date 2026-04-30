@@ -1,0 +1,167 @@
+name: Refresh mime-db
+
+# Surface upstream jshttp/mime-db drift automatically. The job runs
+# generate_mime_db.sh against the current upstream main, regenerates
+# the embedded data tables, and — if the result differs from main — files
+# an issue summarising the upstream commit bump and the local diff so a
+# maintainer can review and merge a refresh PR by hand. The manual path
+# (just running scripts/generate_mime_db.sh locally) is unchanged; this
+# workflow is only the "did upstream move?" notifier.
+
+on:
+  schedule:
+    # Weekly, Monday 03:30 UTC. Off-peak for GitHub Actions and clearly
+    # outside of any release-cut window.
+    - cron: "30 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: refresh-mime-db
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Detect mime-db drift and file an issue
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: extractions/setup-just@v3
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28"
+          gleam-version: "1.15.2"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Verify jq is available
+        run: jq --version
+
+      - name: Clone upstream mime-db
+        run: |
+          mkdir -p doc/reference/upstream
+          git clone --depth=1 https://github.com/jshttp/mime-db.git doc/reference/upstream/mime-db
+
+      - name: Capture upstream version and commit
+        id: upstream
+        run: |
+          set -eu
+          cd doc/reference/upstream/mime-db
+          version="$(jq -er '.version' package.json)"
+          commit="$(git rev-parse --short HEAD)"
+          long_commit="$(git rev-parse HEAD)"
+          {
+            echo "version=$version"
+            echo "commit=$commit"
+            echo "long_commit=$long_commit"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Download dependencies
+        run: just deps
+
+      - name: Regenerate embedded mime-db tables
+        run: bash scripts/generate_mime_db.sh
+
+      - name: Diff against committed sources
+        id: diff
+        run: |
+          set -eu
+          if git diff --quiet -- src/mimetype/internal/db.gleam src/mimetype/internal/mimetype_db_ffi.erl src/mimetype/internal/db_ffi.mjs; then
+            echo "drift=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "drift=true" >> "$GITHUB_OUTPUT"
+          git diff --stat -- src/mimetype/internal/db.gleam src/mimetype/internal/mimetype_db_ffi.erl src/mimetype/internal/db_ffi.mjs > /tmp/diffstat.txt
+
+      - name: Look for an existing open drift issue
+        if: steps.diff.outputs.drift == 'true'
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          number="$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --state open \
+            --label automation:mime-db-refresh \
+            --limit 1 \
+            --json number --jq '.[0].number // empty')"
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure label exists
+        if: steps.diff.outputs.drift == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create automation:mime-db-refresh \
+            --repo "${{ github.repository }}" \
+            --description "Automated mime-db drift notification" \
+            --color BFD4F2 \
+            --force
+
+      - name: Build issue body
+        if: steps.diff.outputs.drift == 'true'
+        env:
+          UPSTREAM_VERSION: ${{ steps.upstream.outputs.version }}
+          UPSTREAM_COMMIT: ${{ steps.upstream.outputs.commit }}
+          UPSTREAM_LONG_COMMIT: ${{ steps.upstream.outputs.long_commit }}
+          WORKFLOW_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -eu
+          {
+            echo "Upstream [jshttp/mime-db](https://github.com/jshttp/mime-db) has moved past the version pinned in this repository."
+            echo ""
+            echo "- upstream version: \`${UPSTREAM_VERSION}\`"
+            echo "- upstream commit: [\`${UPSTREAM_COMMIT}\`](https://github.com/jshttp/mime-db/commit/${UPSTREAM_LONG_COMMIT})"
+            echo "- workflow: ${WORKFLOW_URL}"
+            echo ""
+            echo "### Local diff after regeneration"
+            echo ""
+            echo '```'
+            cat /tmp/diffstat.txt
+            echo '```'
+            echo ""
+            echo "### How to refresh manually"
+            echo ""
+            echo '```sh'
+            echo 'git clone https://github.com/jshttp/mime-db.git doc/reference/upstream/mime-db'
+            echo 'bash scripts/generate_mime_db.sh'
+            echo '```'
+            echo ""
+            echo "See [CONTRIBUTING.md \"Regenerating the extension database\"](../blob/main/CONTRIBUTING.md#regenerating-the-extension-database) and \"Automated upstream drift detection\" for the manual override path and the licence-notice rules that apply to regenerated FFI files."
+            echo ""
+            echo "---"
+            echo "*This issue was filed automatically by the \`refresh-mime-db\` workflow.*"
+          } > /tmp/issue-body.md
+
+      - name: File or update drift issue
+        if: steps.diff.outputs.drift == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_VERSION: ${{ steps.upstream.outputs.version }}
+          UPSTREAM_COMMIT: ${{ steps.upstream.outputs.commit }}
+          EXISTING_NUMBER: ${{ steps.existing.outputs.number }}
+        run: |
+          set -eu
+          title="chore(mime-db): refresh to v${UPSTREAM_VERSION} (${UPSTREAM_COMMIT})"
+          if [ -n "$EXISTING_NUMBER" ]; then
+            gh issue comment "$EXISTING_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --body-file /tmp/issue-body.md
+            gh issue edit "$EXISTING_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --title "$title"
+          else
+            gh issue create \
+              --repo "${{ github.repository }}" \
+              --title "$title" \
+              --body-file /tmp/issue-body.md \
+              --label automation:mime-db-refresh
+          fi

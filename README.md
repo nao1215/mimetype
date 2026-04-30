@@ -79,6 +79,133 @@ pub fn main() {
 }
 ```
 
+## Reader-based detection
+
+`detect_reader` and `detect_reader_strict` let callers detect a MIME
+type **without buffering the whole input**. They take a synchronous
+reader plus a byte budget, and the reader is invoked **at most once**
+to fetch up to that many bytes from the start of the source.
+
+### Reader contract
+
+```gleam
+pub type Reader(read_error) = fn(Int) -> Result(BitArray, read_error)
+```
+
+- The `Int` argument is the maximum number of bytes the detector wants.
+- Returning fewer bytes than requested is fine — it is interpreted as
+  "the source ended early". Detection runs against whatever was
+  returned.
+- The returned `BitArray` should always be the prefix starting at
+  offset 0 of the source. The detector inspects it from byte 0.
+- The error parameter `read_error` is opaque to the library; in the
+  strict variant it is preserved as `ReaderError(read_error)` so
+  callers can distinguish IO failures from "no signature matched".
+
+The reader is called **once per detection call**. There is no
+streaming or back-and-forth — return enough bytes for the largest
+signature you care about (the detector inspects up to a few KB by
+default), or pass a custom `limit` argument tuned for your workload.
+
+### In-memory adapter
+
+The simplest case: when the bytes are already in hand, wrap them in a
+function that ignores its argument.
+
+```gleam
+import mimetype
+
+pub fn main() {
+  let png = <<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>
+  let reader = fn(_limit) { Ok(png) }
+
+  mimetype.detect_reader(reader, 3072)
+  |> mimetype.to_string
+  // -> "image/png"
+}
+```
+
+### BEAM file prefix reader
+
+On the Erlang target, wrap a file-IO library so that one call returns
+up to `limit` bytes from the start of the file. Any IO library that
+can open a file and read a fixed-size prefix works — the snippet below
+sketches the shape using a `read_prefix(path, limit)` helper that
+returns `Result(BitArray, your_error)`:
+
+```gleam
+import mimetype
+
+pub fn detect_file(path: String) -> Result(mimetype.MimeType, mimetype.DetectionError(your_error)) {
+  let reader = fn(limit) { read_prefix(path, limit) }
+  mimetype.detect_reader_strict(reader, 3072)
+}
+```
+
+If `read_prefix` returns `Ok(<<>>)` for an empty file, the strict
+variant surfaces `Error(EmptyInput)`. If `read_prefix` itself returns
+`Error(some_io_error)`, the strict variant surfaces
+`Error(ReaderError(some_io_error))` so the caller can distinguish IO
+failure from a genuine no-match.
+
+### JavaScript browser adapter
+
+In the browser, `File` / `Blob` / `ReadableStream` reads are
+asynchronous, so they cannot satisfy the synchronous `Reader`
+contract directly. The intended pattern is:
+
+1. Read the prefix asynchronously (`await blob.slice(0, limit).arrayBuffer()`
+   or the equivalent on a `ReadableStream`).
+2. Pass the resulting bytes to `detect` / `detect_strict`, **not** to
+   `detect_reader`.
+
+In Gleam pseudo-code, with an FFI helper `read_blob_prefix` that
+awaits the slice and returns a `BitArray`:
+
+```gleam
+import mimetype
+
+pub fn detect_blob(blob: Blob) -> mimetype.MimeType {
+  // `read_blob_prefix` is your FFI: await blob.slice(0, 3072).arrayBuffer()
+  let bytes = read_blob_prefix(blob, 3072)
+  mimetype.detect(bytes)
+}
+```
+
+The reader-based API is most useful when the source is itself
+synchronous (BEAM file IO, in-memory buffers, deterministic stream
+adapters). For Promise-based sources, awaiting the prefix once and
+calling `detect` is the recommended shape.
+
+### Strict variants and error handling
+
+The strict variants return `Result(MimeType, DetectionError(read_error))`,
+where `DetectionError` distinguishes:
+
+- `EmptyInput` — the reader returned a zero-byte payload, so no
+  detection was possible.
+- `NoMatch` — the reader returned bytes, but no signature and no
+  printable-ASCII fallback applied.
+- `ReaderError(e)` — the reader itself failed; `e` is preserved
+  unchanged.
+- `UnknownExtension(_)` — only emitted by extension/filename helpers,
+  not the reader API.
+
+```gleam
+import gleam/io
+import mimetype
+
+pub fn classify(reader) {
+  case mimetype.detect_reader_strict(reader, 3072) {
+    Ok(mime) -> io.println(mimetype.to_string(mime))
+    Error(mimetype.EmptyInput) -> io.println("empty source")
+    Error(mimetype.NoMatch) -> io.println("unrecognised content")
+    Error(mimetype.ReaderError(reason)) -> io.debug(reason)
+    Error(mimetype.UnknownExtension(_)) -> Nil
+  }
+}
+```
+
 ## Supported magic-number formats
 
 `detect/1` currently recognizes many common MIME types, including:

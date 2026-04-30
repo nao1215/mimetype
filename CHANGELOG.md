@@ -1,6 +1,65 @@
 # Changelog
 
-## Unreleased
+## [Unreleased]
+
+## [0.11.0] - 2026-04-30
+
+### Added
+
+- **bench**: new local benchmark harness under
+  `test/mimetype_bench.gleam` covering the hot lookup and detection
+  paths — extension lookup, reverse MIME lookup, filename lookup,
+  fixed-signature detection (PNG / PDF / ZIP), structural ZIP-container
+  detection (DOCX / JAR), structural sniffs (JSON / HTML), and the
+  printable-ASCII fallback. Each case prints a Markdown row of `ns/op`
+  figures after a one-pass warmup. Two new justfile recipes —
+  `just bench-erlang` and `just bench-javascript` (and `just bench`
+  for both) — drive the harness on each target. A monotonic-time FFI
+  helper for each runtime sits next to the bench module in `test/`.
+  The harness is intentionally not wired into PR-time CI gates; it is
+  for local A/B comparison and ad-hoc investigation. (#77)
+
+### Changed
+
+- **README**: the "Supported magic-number formats" bullet list is now
+  generated from the signature table in
+  `src/mimetype/internal/magic.gleam` by
+  `scripts/generate_supported_formats.sh`. The new `just generate-readme`
+  recipe rewrites the section in place; `just readme-check` (and a
+  dedicated `readme-up-to-date` CI job) fails when the committed README
+  drifts from the implementation. The previous hand-curated list missed
+  several signatures already in the source (`application/json`,
+  `application/msword`, `image/svg+xml`, the `font/*` family, etc.); the
+  generated list surfaces the full set, grouped by top-level family
+  (Application / Audio / Font / Image / Text / Video). (#76)
+
+### Documentation
+
+- **README**: new "Reader-based detection" section between Usage and
+  Supported formats. It documents the synchronous `Reader` contract,
+  shows an in-memory adapter snippet, sketches a BEAM file-prefix
+  adapter pattern, and explains why browser `File` / `Blob` /
+  `ReadableStream` sources should be awaited up-front and passed to
+  `detect` rather than wrapped in a fake-async reader. A trailing
+  subsection enumerates the four `DetectionError` constructors —
+  `EmptyInput`, `NoMatch`, `ReaderError(e)`, `UnknownExtension(_)` —
+  so users adopting `detect_reader_strict` can distinguish reader IO
+  failure from a genuine no-signature outcome without reverse-engineering
+  the type. (#75)
+
+### Tests
+
+- **cross-target**: twelve new tests under a "Issue #73" header in
+  `test/mimetype_test.gleam`, covering `detect_reader` parity with
+  `detect(bytes)` for JPEG / DOCX / JSON / HTML payloads,
+  `detect_reader_strict` edge cases for empty and partial reader
+  payloads, ZIP-allowlist negatives (a stored-`mimetype` entry with
+  junk content and a ZIP with only `[Content_Types].xml` must fall
+  back to `application/zip`), and `detect_with_filename` /
+  `detect_with_extension` precedence around empty bytes plus known
+  or unknown hints — including the `EmptyInput` contract for the
+  strict variants and basename extraction for path-form filenames.
+  All tests run on both Erlang and JavaScript automatically. (#73)
 
 ## [0.10.0] - 2026-04-30
 

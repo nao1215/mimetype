@@ -51,6 +51,12 @@ docs:
 generate-db:
   bash scripts/generate_mime_db.sh
 
+generate-readme:
+  sh scripts/generate_supported_formats.sh
+
+readme-check:
+  sh scripts/generate_supported_formats.sh --check
+
 check: clean
   gleam format --check src/ test/
   gleam check

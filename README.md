@@ -208,15 +208,116 @@ pub fn classify(reader) {
 
 ## Supported magic-number formats
 
-`detect/1` currently recognizes many common MIME types, including:
+<!-- BEGIN_SUPPORTED_FORMATS -->
+`detect/1` recognises the following MIME types from byte-level
+signatures or structural sniffs near the start of the input. This
+list is generated from `src/mimetype/internal/magic.gleam` by
+`scripts/generate_supported_formats.sh` — do not edit it by hand;
+re-run `just generate-readme` after adding or removing a signature.
 
-- Archive and container formats: `application/zip`, `application/gzip`, `application/x-bzip2`, `application/x-xz`, `application/x-7z-compressed`, `application/x-rar-compressed`, `application/vnd.ms-cab-compressed`, `application/x-tar`, `application/zstd`
-- Documents and data formats: `application/pdf`, `application/vnd.sqlite3`, `application/vnd.apache.parquet`
-- ZIP-derived document formats: `application/epub+zip`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document`, `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, `application/vnd.openxmlformats-officedocument.presentationml.presentation`, `application/vnd.oasis.opendocument.text`, `application/vnd.oasis.opendocument.spreadsheet`, `application/vnd.oasis.opendocument.presentation`, `application/java-archive`, `application/vnd.android.package-archive`
-- Runtime and transport formats: `application/ogg`, `application/wasm`, `application/x-elf`
-- Audio formats: `audio/wav`, `audio/aiff`, `audio/mpeg`, `audio/flac`, `audio/midi`, `audio/mp4`
-- Image formats: `image/png`, `image/jpeg`, `image/gif`, `image/bmp`, `image/tiff`, `image/x-icon`, `image/webp`, `image/avif`, `image/heic`
-- Video formats: `video/x-msvideo`, `video/webm`, `video/quicktime`, `video/mp4`
+### Application formats
+
+- `application/epub+zip`
+- `application/gzip`
+- `application/java-archive`
+- `application/json`
+- `application/msword`
+- `application/ogg`
+- `application/pdf`
+- `application/vnd.android.package-archive`
+- `application/vnd.apache.parquet`
+- `application/vnd.ms-asf`
+- `application/vnd.ms-cab-compressed`
+- `application/vnd.ms-excel`
+- `application/vnd.ms-fontobject`
+- `application/vnd.ms-powerpoint`
+- `application/vnd.oasis.opendocument.presentation`
+- `application/vnd.oasis.opendocument.spreadsheet`
+- `application/vnd.oasis.opendocument.text`
+- `application/vnd.openxmlformats-officedocument.presentationml.presentation`
+- `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
+- `application/vnd.openxmlformats-officedocument.wordprocessingml.document`
+- `application/vnd.sqlite3`
+- `application/wasm`
+- `application/x-7z-compressed`
+- `application/x-archive`
+- `application/x-bzip2`
+- `application/x-compress`
+- `application/x-deflate`
+- `application/x-elf`
+- `application/x-lz4`
+- `application/x-lzh-compressed`
+- `application/x-lzip`
+- `application/x-ole-storage`
+- `application/x-rar-compressed`
+- `application/x-snappy-framed`
+- `application/x-tar`
+- `application/x-xz`
+- `application/zip`
+- `application/zstd`
+
+### Audio formats
+
+- `audio/aac`
+- `audio/ac3`
+- `audio/aiff`
+- `audio/amr`
+- `audio/amr-wb`
+- `audio/flac`
+- `audio/midi`
+- `audio/mp4`
+- `audio/mpeg`
+- `audio/wav`
+
+### Font formats
+
+- `font/collection`
+- `font/otf`
+- `font/ttf`
+- `font/woff`
+- `font/woff2`
+
+### Image formats
+
+- `image/avif`
+- `image/bmp`
+- `image/fits`
+- `image/gif`
+- `image/heic`
+- `image/jp2`
+- `image/jpeg`
+- `image/jxl`
+- `image/png`
+- `image/svg+xml`
+- `image/tiff`
+- `image/vnd.adobe.photoshop`
+- `image/vnd.ms-dds`
+- `image/vnd.radiance`
+- `image/webp`
+- `image/x-exr`
+- `image/x-icon`
+- `image/x-qoi`
+
+### Text formats
+
+- `text/html`
+- `text/plain`
+- `text/plain; charset=utf-16be`
+- `text/plain; charset=utf-16le`
+- `text/plain; charset=utf-32be`
+- `text/plain; charset=utf-32le`
+- `text/plain; charset=utf-8`
+- `text/xml`
+
+### Video formats
+
+- `video/mp4`
+- `video/quicktime`
+- `video/webm`
+- `video/x-flv`
+- `video/x-matroska`
+- `video/x-msvideo`
+<!-- END_SUPPORTED_FORMATS -->
 
 The detector is intentionally shallow: it looks only at fixed
 signatures near the start of the byte stream, plus a small amount of

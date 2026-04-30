@@ -344,6 +344,25 @@ just generate-db
 CI runs the same generator against the pinned upstream commit and fails
 the build if the regenerated output drifts from the committed copies.
 
+### Benchmarks
+
+The hot lookup and detection paths have a small reproducible bench
+harness under `test/mimetype_bench.gleam`. Run it on either target:
+
+```sh
+just bench-erlang
+just bench-javascript
+just bench            # both, in sequence
+```
+
+Each run prints a Markdown table of `ns/op` figures. Capture a
+baseline from `main` before a refactor
+(`just bench-erlang > before.md`), then re-run on the working branch
+and diff the two tables to check for material regressions. The
+harness is intentionally not wired into PR-time CI gates — it is for
+local A/B comparison and ad-hoc investigation, not for blocking
+merges on micro-fluctuations.
+
 ## Licensing
 
 The data tables under `src/mimetype/internal/` are generated from

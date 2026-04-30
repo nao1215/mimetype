@@ -33,6 +33,7 @@ unused_exports = "off"
 [tools.glinter.ignore]
 "test/**/*.gleam" = [
   "assert_ok_pattern",
+  "discarded_result",
   "missing_type_annotation",
   "unused_exports",
 ]

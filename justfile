@@ -57,6 +57,14 @@ generate-readme:
 readme-check:
   sh scripts/generate_supported_formats.sh --check
 
+bench-erlang:
+  gleam run --target erlang -m mimetype_bench
+
+bench-javascript:
+  gleam run --target javascript -m mimetype_bench
+
+bench: bench-erlang bench-javascript
+
 check: clean
   gleam format --check src/ test/
   gleam check

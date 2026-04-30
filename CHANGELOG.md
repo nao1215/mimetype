@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Added
+
+- **automation**: scheduled `Refresh mime-db` workflow
+  (`.github/workflows/refresh-mime-db.yml`) runs weekly and on
+  `workflow_dispatch`. When upstream `jshttp/mime-db` has moved past
+  the pinned commit, the workflow regenerates the embedded data
+  tables in a fresh checkout, detects whether the output differs
+  from `main`, and files (or updates) an
+  `automation:mime-db-refresh`-labelled issue summarising the
+  upstream version, commit, and `git diff --stat` of the regenerated
+  files. The workflow does not push or open a PR — a maintainer
+  consumes the issue, runs the documented regeneration steps
+  locally, and opens a normal review PR. CONTRIBUTING.md is
+  extended with an "Automated upstream drift detection" section
+  documenting the workflow and the manual override path. (#72)
+
 ## [0.9.0] - 2026-04-29
 
 ### Fixed

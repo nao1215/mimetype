@@ -76,6 +76,29 @@ When changing the generation logic or updating the upstream data:
 3. Keep `THIRD_PARTY_NOTICES.md` aligned with the packaged third-party data
 4. Run `just ci`
 
+### Automated upstream drift detection
+
+The `Refresh mime-db` workflow (`.github/workflows/refresh-mime-db.yml`)
+runs every Monday at 03:30 UTC and on demand via *Actions → Refresh mime-db
+→ Run workflow*. It clones the latest `jshttp/mime-db`, regenerates the
+embedded data tables in a fresh checkout, and — only when the regenerated
+output differs from `main` — files (or updates) an issue tagged
+`automation:mime-db-refresh` summarising:
+
+- the upstream `package.json` version,
+- the upstream commit SHA, and
+- a `git diff --stat` of the regenerated files.
+
+The workflow does not push or open a PR. To consume a drift notification:
+
+1. Pick up the open `automation:mime-db-refresh` issue.
+2. Locally run the regeneration steps documented above.
+3. Open a normal PR with the regenerated files and link the issue.
+4. Close the issue when the PR merges.
+
+If you want to trigger a check off-cycle (e.g., to confirm the package
+is at parity right after release), use the `workflow_dispatch` button.
+
 ## Project structure
 
 `mimetype` intentionally splits the problem into two layers:

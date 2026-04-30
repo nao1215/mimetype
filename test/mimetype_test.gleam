@@ -1903,3 +1903,165 @@ pub fn charset_of_utf32_be_bom_test() {
   mimetype.charset_of(<<0x00, 0x00, 0xFE, 0xFF, 0x00, 0x00, 0x00, 0x48>>)
   |> should.equal(Ok("utf-32be"))
 }
+
+// ---------------------------------------------------------------------------
+// Issue #73: expanded cross-target corpus for detect_reader and
+// filename-aware detection. These tests run on both Erlang and JavaScript
+// because the test file has no @target gates, so they assert behavior
+// parity across targets in addition to the explicit precedence rules.
+// ---------------------------------------------------------------------------
+
+// detect_reader parity: the reader-based path must yield the same MimeType
+// as the BitArray-based path for diverse signature kinds (binary magic,
+// ZIP-container allowlist, structural sniffs).
+
+pub fn detect_reader_parity_jpeg_test() {
+  let jpeg = <<0xFF, 0xD8, 0xFF, 0xE0>>
+  let reader = fn(_limit) { Ok(jpeg) }
+  let from_reader = mimetype.detect_reader(reader, 3072)
+  let from_bytes = mimetype.detect(jpeg)
+  from_reader
+  |> mimetype.to_string
+  |> should.equal(mimetype.to_string(from_bytes))
+  from_reader
+  |> should_be_mime("image/jpeg")
+}
+
+pub fn detect_reader_parity_zip_container_docx_test() {
+  let docx =
+    bit_array.concat([
+      // Entry 1: [Content_Types].xml
+      <<0x50, 0x4B, 0x03, 0x04>>,
+      <<0x14, 0x00, 0x00, 0x00, 0x00, 0x00>>,
+      <<0x00, 0x00, 0x00, 0x00>>,
+      <<0x00, 0x00, 0x00, 0x00>>,
+      <<0x00, 0x00, 0x00, 0x00>>,
+      <<0x00, 0x00, 0x00, 0x00>>,
+      <<0x13, 0x00>>,
+      <<0x00, 0x00>>,
+      <<"[Content_Types].xml":utf8>>,
+      // Entry 2: word/document.xml
+      <<0x50, 0x4B, 0x03, 0x04>>,
+      <<0x14, 0x00, 0x00, 0x00, 0x00, 0x00>>,
+      <<0x00, 0x00, 0x00, 0x00>>,
+      <<0x00, 0x00, 0x00, 0x00>>,
+      <<0x00, 0x00, 0x00, 0x00>>,
+      <<0x00, 0x00, 0x00, 0x00>>,
+      <<0x11, 0x00>>,
+      <<0x00, 0x00>>,
+      <<"word/document.xml":utf8>>,
+    ])
+  let reader = fn(_limit) { Ok(docx) }
+  let from_reader = mimetype.detect_reader(reader, 3072)
+  let from_bytes = mimetype.detect(docx)
+  from_reader
+  |> mimetype.to_string
+  |> should.equal(mimetype.to_string(from_bytes))
+  from_reader
+  |> should_be_mime(
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  )
+}
+
+pub fn detect_reader_parity_json_structural_test() {
+  let json = <<"{\"x\":1}":utf8>>
+  let reader = fn(_limit) { Ok(json) }
+  let from_reader = mimetype.detect_reader(reader, 3072)
+  let from_bytes = mimetype.detect(json)
+  from_reader
+  |> mimetype.to_string
+  |> should.equal(mimetype.to_string(from_bytes))
+  from_reader
+  |> should_be_mime("application/json")
+}
+
+pub fn detect_reader_parity_html_structural_test() {
+  let html = <<"<html><body>hi</body></html>":utf8>>
+  let reader = fn(_limit) { Ok(html) }
+  let from_reader = mimetype.detect_reader(reader, 3072)
+  let from_bytes = mimetype.detect(html)
+  from_reader
+  |> mimetype.to_string
+  |> should.equal(mimetype.to_string(from_bytes))
+  from_reader
+  |> should_be_mime("text/html")
+}
+
+// detect_reader_strict: edge cases for empty / partial reader payloads.
+
+pub fn detect_reader_strict_empty_payload_returns_empty_input_test() {
+  let reader: fn(Int) -> Result(BitArray, String) = fn(_limit) { Ok(<<>>) }
+  mimetype.detect_reader_strict(reader, 3072)
+  |> should.equal(Error(mimetype.EmptyInput))
+}
+
+pub fn detect_reader_strict_partial_eof_returns_no_match_test() {
+  // Reader returns 64 zero bytes — TAR signature lives at offset 257, so
+  // no signature can match within the prefix and the all-zero payload
+  // also fails the printable-ASCII fallback. Strict variant must surface
+  // NoMatch (the lenient one is asserted separately above).
+  let short_bytes = <<0:size({ 64 * 8 })>>
+  let reader: fn(Int) -> Result(BitArray, String) = fn(_limit) {
+    Ok(short_bytes)
+  }
+  mimetype.detect_reader_strict(reader, 3072)
+  |> should.equal(Error(mimetype.NoMatch))
+}
+
+// ZIP-container allowlist negative cases: malformed allowlist hints must
+// fall back to application/zip rather than be coerced into a richer type.
+
+pub fn detect_zip_with_wrong_mimetype_entry_falls_back_to_zip_test() {
+  // The "mimetype" stored entry exists but its content is not on the
+  // allowlist (EPUB, ODT, ODS, ODP). Detection must walk past the entry
+  // and report the ZIP base type rather than guess.
+  let zip = stored_mimetype_zip_archive(<<"application/x-not-real":utf8>>)
+  should_detect(zip, "application/zip")
+}
+
+pub fn detect_zip_with_only_content_types_xml_falls_back_to_zip_test() {
+  // OOXML detection requires both [Content_Types].xml and one of the
+  // family directories (word/, xl/, ppt/). A ZIP that has the manifest
+  // but no family entry must report application/zip.
+  let zip =
+    bit_array.concat([
+      <<0x50, 0x4B, 0x03, 0x04>>,
+      <<0x14, 0x00, 0x00, 0x00, 0x00, 0x00>>,
+      <<0x00, 0x00, 0x00, 0x00>>,
+      <<0x00, 0x00, 0x00, 0x00>>,
+      <<0x00, 0x00, 0x00, 0x00>>,
+      <<0x00, 0x00, 0x00, 0x00>>,
+      <<0x13, 0x00>>,
+      <<0x00, 0x00>>,
+      <<"[Content_Types].xml":utf8>>,
+    ])
+  should_detect(zip, "application/zip")
+}
+
+// detect_with_filename / detect_with_extension: edge cases around empty
+// inputs and path-form filenames that the lower-level filename parser
+// already handles. These assertions pin the helper-level contract so the
+// docs can cite precedence with confidence.
+
+pub fn detect_with_filename_uses_filename_for_empty_bytes_test() {
+  mimetype.detect_with_filename(<<>>, "report.pdf")
+  |> should_be_mime("application/pdf")
+}
+
+pub fn detect_with_filename_strict_returns_empty_input_for_empty_bytes_and_unknown_filename_test() {
+  mimetype.detect_with_filename_strict(<<>>, "README")
+  |> should.equal(Error(mimetype.EmptyInput))
+}
+
+pub fn detect_with_extension_strict_returns_empty_input_for_empty_bytes_and_unknown_extension_test() {
+  mimetype.detect_with_extension_strict(<<>>, "totally-unknown-ext")
+  |> should.equal(Error(mimetype.EmptyInput))
+}
+
+pub fn detect_with_filename_handles_path_components_test() {
+  // Mirrors filename_to_mime_type's basename extraction: the helper must
+  // see only the trailing segment, so directory components don't poison
+  // the extension lookup.
+  mimetype.detect_with_filename(<<>>, "/tmp/files/note.pdf")
+  |> should_be_mime("application/pdf")
+}

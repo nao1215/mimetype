@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-05-04
+
+### Documentation
+
+- **readme**: Lead with the two highest-traffic uses — picking a
+  `Content-Type` for file serving, and validating uploads against magic
+  bytes — before the API reference and the boundary discussion. The
+  capability and limitation notes that previously sat between the
+  install snippet and the first example were preserved verbatim and
+  moved into a new "Capabilities and limitations" section after the
+  happy path. (#85)
+
+### Changed
+
+- **internal**: `mimetype/internal/magic` lifts the printable-ASCII
+  `text/plain` fallback out of the `signatures` const so
+  `detect_signature/1` no longer has to filter it out on every call.
+  `detect/1` falls through to the fallback explicitly when no other
+  signature matches; observable behavior is unchanged. (#85)
+
 ## [0.11.0] - 2026-04-30
 
 ### Added

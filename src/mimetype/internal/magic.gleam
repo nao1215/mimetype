@@ -226,17 +226,26 @@ const signatures = [
   Bytes("text/plain; charset=utf-16le", [#(0, <<0xFF, 0xFE>>)]),
   Bytes("text/plain; charset=utf-16be", [#(0, <<0xFE, 0xFF>>)]),
   Bytes("text/plain; charset=utf-8", [#(0, <<0xEF, 0xBB, 0xBF>>)]),
-  Check("text/plain", looks_like_plain_text),
 ]
+
+// The printable-ASCII fallback lives outside `signatures` so
+// `detect_signature` does not have to filter it back out on every
+// call. `detect` falls through to it explicitly when no other
+// signature matches.
+const printable_ascii_fallback = Check("text/plain", looks_like_plain_text)
 
 /// Try to recognize a MIME type from a leading byte signature.
 ///
 /// Returns `Some(mime_type)` when a known signature matches and `None`
 /// otherwise.
 pub fn detect(bytes: BitArray) -> Option(String) {
-  case signatures |> list.find_map(detect_match(bytes, _)) {
+  case list.find_map(signatures, detect_match(bytes, _)) {
     Ok(mime_type) -> Some(mime_type)
-    Error(Nil) -> None
+    Error(Nil) ->
+      case detect_match(bytes, printable_ascii_fallback) {
+        Ok(mime_type) -> Some(mime_type)
+        Error(Nil) -> None
+      }
   }
 }
 
@@ -247,25 +256,9 @@ pub fn detect(bytes: BitArray) -> Option(String) {
 /// inspect bytes (JSON, HTML, XML, SVG). Returns `None` for plain-ASCII
 /// payloads where `detect` would have returned `Some("text/plain")`.
 pub fn detect_signature(bytes: BitArray) -> Option(String) {
-  let result =
-    signatures
-    |> list.filter(fn(signature) { !is_printable_ascii_fallback(signature) })
-    |> list.find_map(detect_match(bytes, _))
-  case result {
+  case list.find_map(signatures, detect_match(bytes, _)) {
     Ok(mime_type) -> Some(mime_type)
     Error(Nil) -> None
-  }
-}
-
-// The printable-ASCII fallback is the only `Check("text/plain", _)`
-// entry in `signatures`: every other `text/plain` entry uses `Bytes`
-// to match a specific BOM. Filtering on this shape keeps
-// `detect_signature` from accepting plain-ASCII text as a "real"
-// signature match while still returning the BOM-tagged variants.
-fn is_printable_ascii_fallback(signature: Signature) -> Bool {
-  case signature {
-    Check("text/plain", _) -> True
-    _ -> False
   }
 }
 

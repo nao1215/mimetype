@@ -27,19 +27,94 @@ The extension database is generated from `jshttp/mime-db`, which tracks
 the IANA media type registry and common ecosystem aliases. Refreshing
 the generated table keeps lookups aligned with that upstream source.
 
-This library intentionally stays focused:
+## Serving a file: pick a Content-Type from a filename
 
-- It does perform shallow ZIP-container inspection for a small fixed allowlist: `epub`, OOXML (`docx`/`xlsx`/`pptx`), OpenDocument (`odt`/`ods`/`odp`), `jar`, and `apk`. It does not recurse arbitrarily into nested containers or inspect embedded subformats beyond those targeted signatures.
-- It does sniff `text/plain` from printable-ASCII-only payloads (the bounded WHATWG-style binary-vs-text heuristic added in #20) and recognises the UTF-8/16/32 BOM signatures, returning `text/plain; charset=<utf-X>` for the BOM cases. This is the **only** text-related sniffing — it does not detect text encodings beyond the BOM marker, and the printable-ASCII fallback emits a bare `text/plain` with no charset parameter.
-- Beyond the four BOM-derived `text/plain; charset=utf-*` signatures it does not parse, validate, or surface MIME-parameter values from the wire.
+The most common use is reading the filename your handler already has,
+turning it into a wire-ready `Content-Type` value. `filename_to_mime_type`
+is case-insensitive and falls back to `application/octet-stream` for
+unknown extensions, so the helper is safe to drop into a response path
+without extra branching.
 
-## Usage
+```gleam
+import mimetype
 
-Detection / lookup helpers return an opaque `MimeType` value. Use
-`mimetype.to_string` to serialise one for an HTTP `Content-Type`
-header; use `mimetype.parse` to construct one from a wire-format
-string. Inspect with `essence_of`, `parameter_of`, `charset_of_type`,
-`is_image`, `is_a`, and the rest of the predicate / accessor family.
+/// Pick the Content-Type header value to send back when serving
+/// `filename` from disk or object storage.
+pub fn content_type_for(filename: String) -> String {
+  mimetype.filename_to_mime_type(filename)
+  |> mimetype.to_string
+}
+
+// content_type_for("report.PDF")    -> "application/pdf"
+// content_type_for("avatar.jpg")    -> "image/jpeg"
+// content_type_for("archive.tar.gz") -> "application/gzip"
+// content_type_for("notes")         -> "application/octet-stream"
+```
+
+For HTML / CSS / JS responses where browsers expect a charset, parse
+the wire string once and append the parameter you actually serve:
+
+```gleam
+import gleam/option.{Some}
+import mimetype
+
+pub fn html_content_type() -> String {
+  let assert Ok(html) = mimetype.parse("text/html; charset=utf-8")
+  mimetype.to_string(html)
+  // -> "text/html; charset=utf-8"
+}
+```
+
+## Validating an upload: detect from bytes, not the user's extension
+
+Browser-uploaded filenames are user input and can lie. Match the leading
+bytes of the upload against `mimetype.detect` to get the actual format,
+then enforce an allowlist of MIME types your endpoint will accept.
+
+```gleam
+import mimetype
+
+pub type UploadError {
+  EmptyUpload
+  Unsupported(detected: String)
+}
+
+/// Allow only PNG, JPEG, and WebP uploads. The detected MIME type is
+/// derived from magic bytes — the caller's filename is ignored.
+pub fn validate_image_upload(
+  bytes: BitArray,
+) -> Result(mimetype.MimeType, UploadError) {
+  case mimetype.detect_strict(bytes) {
+    Ok(mime) ->
+      case mimetype.is_image(mime) && image_is_allowed(mime) {
+        True -> Ok(mime)
+        False -> Error(Unsupported(detected: mimetype.to_string(mime)))
+      }
+    Error(mimetype.EmptyInput) -> Error(EmptyUpload)
+    Error(_) -> Error(Unsupported(detected: "application/octet-stream"))
+  }
+}
+
+fn image_is_allowed(mime: mimetype.MimeType) -> Bool {
+  case mimetype.essence_of(mime) {
+    "image/png" | "image/jpeg" | "image/webp" -> True
+    _ -> False
+  }
+}
+```
+
+The strict variant separates `EmptyInput` (zero-byte upload) from
+`NoMatch` (bytes that did not match any signature) so the caller can
+return the right HTTP status. For a non-throwing path, `mimetype.detect`
+returns `application/octet-stream` for both cases instead.
+
+## Other API entry points
+
+The full surface returns an opaque `MimeType`. Use `mimetype.to_string`
+to serialise for an HTTP header; use `mimetype.parse` to construct one
+from a wire-format string. Inspect with `essence_of`, `parameter_of`,
+`charset_of_type`, `is_image`, `is_a`, and the rest of the predicate /
+accessor family.
 
 ```gleam
 import gleam/option.{Some}
@@ -54,21 +129,6 @@ pub fn main() {
   mimetype.mime_type_to_extensions(jpeg)
   // -> ["jpg", "jpeg", "jpe"]
 
-  mimetype.filename_to_mime_type("photo.JPG")
-  |> mimetype.to_string
-  // -> "image/jpeg"
-
-  mimetype.detect(<<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>)
-  |> mimetype.is_image
-  // -> True
-
-  mimetype.detect(<<>>)
-  |> mimetype.to_string
-  // -> "application/octet-stream"  (silent fallback for unknown / empty input)
-
-  mimetype.detect_strict(<<>>)
-  // -> Error(EmptyInput)  (loud variant — empty input vs. NoMatch)
-
   mimetype.detect_with_filename(<<0, 1, 2, 3>>, "report.csv")
   |> mimetype.essence_of
   // -> "text/csv"
@@ -78,6 +138,15 @@ pub fn main() {
   // -> Some("utf-8")
 }
 ```
+
+## Capabilities and limitations
+
+This library intentionally stays focused. Knowing where the detector
+stops is more useful than discovering it from a surprising result:
+
+- It does perform shallow ZIP-container inspection for a small fixed allowlist: `epub`, OOXML (`docx`/`xlsx`/`pptx`), OpenDocument (`odt`/`ods`/`odp`), `jar`, and `apk`. It does not recurse arbitrarily into nested containers or inspect embedded subformats beyond those targeted signatures.
+- It does sniff `text/plain` from printable-ASCII-only payloads (the bounded WHATWG-style binary-vs-text heuristic added in #20) and recognises the UTF-8/16/32 BOM signatures, returning `text/plain; charset=<utf-X>` for the BOM cases. This is the **only** text-related sniffing — it does not detect text encodings beyond the BOM marker, and the printable-ASCII fallback emits a bare `text/plain` with no charset parameter.
+- Beyond the four BOM-derived `text/plain; charset=utf-*` signatures it does not parse, validate, or surface MIME-parameter values from the wire.
 
 ## Reader-based detection
 

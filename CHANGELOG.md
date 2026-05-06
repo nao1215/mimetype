@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-05-06
+
 ### Fixed
 - `mimetype.parse/1` is now quoted-string-aware when splitting
   parameters: a `;` (or `=`) inside a `"..."` value is preserved as

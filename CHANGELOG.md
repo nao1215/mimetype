@@ -3,6 +3,15 @@
 ## [Unreleased]
 
 ### Fixed
+- `mimetype.parse/1` is now quoted-string-aware when splitting
+  parameters: a `;` (or `=`) inside a `"..."` value is preserved as
+  part of the value instead of being treated as a parameter separator.
+  Previously, `parse("application/json; description=\"a; b\"; charset=utf-8")`
+  truncated `description` to `"a` and parsed the rest of the
+  quoted-string as further top-level parameters, violating
+  RFC 7230 §3.2.6 which permits `;` inside `qdtext`. The new splitter
+  is also `\\`-escape aware so values like `"a\"b; c"` round-trip.
+  This is a strict superset of the unquoting fix in #69. (#89)
 - `mimetype.parse/1` now rejects `Content-Type` strings whose
   `type/subtype` essence contains internal whitespace, control
   characters, or any other non-`tchar` byte. The previous

@@ -119,7 +119,7 @@ pub const default_detection_limit = 3072
 pub fn parse(input: String) -> Result(MimeType, ParseError) {
   let trimmed = string.trim(input)
   use <- bool.guard(when: trimmed == "", return: Error(EmptyMimeType))
-  case string.split(trimmed, on: ";") {
+  case split_on_unquoted_semicolons(trimmed) {
     [] -> Error(EmptyMimeType)
     [head, ..rest] -> {
       let essence_value = head |> string.trim |> string.lowercase
@@ -617,6 +617,39 @@ pub fn detect_with_filename_strict(
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+/// Split on top-level `;` while keeping `;` characters that appear
+/// inside an RFC 7230 §3.2.6 quoted-string (`"..."`) attached to the
+/// surrounding value. Backslash escapes (`\"`, `\\`, `\;` etc.) within
+/// a quoted-string are honoured so the next character does not toggle
+/// the quote state.
+fn split_on_unquoted_semicolons(s: String) -> List(String) {
+  do_split_semis(s, "", [], False, False)
+  |> list.reverse
+}
+
+fn do_split_semis(
+  remaining: String,
+  current: String,
+  acc: List(String),
+  in_quote: Bool,
+  escape: Bool,
+) -> List(String) {
+  case string.pop_grapheme(remaining) {
+    Error(Nil) -> [current, ..acc]
+    Ok(#(g, rest)) ->
+      case escape, g, in_quote {
+        True, _, _ -> do_split_semis(rest, current <> g, acc, in_quote, False)
+        False, "\\", True ->
+          do_split_semis(rest, current <> g, acc, in_quote, True)
+        False, "\"", _ ->
+          do_split_semis(rest, current <> g, acc, !in_quote, False)
+        False, ";", False ->
+          do_split_semis(rest, "", [current, ..acc], False, False)
+        False, _, _ -> do_split_semis(rest, current <> g, acc, in_quote, False)
+      }
+  }
+}
 
 fn valid_essence(essence: String) -> Bool {
   case string.split_once(essence, on: "/") {

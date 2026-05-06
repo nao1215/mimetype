@@ -315,6 +315,44 @@ pub fn parse_accepts_valid_token_essence_test() {
   |> should.equal("application/vnd.api+json")
 }
 
+pub fn parse_keeps_semicolon_inside_quoted_value_test() {
+  let assert Ok(mt) =
+    mimetype.parse("application/json; description=\"a; b\"; charset=utf-8")
+  mt
+  |> mimetype.parameter_of("description")
+  |> should.equal(Some("a; b"))
+  mt
+  |> mimetype.parameter_of("charset")
+  |> should.equal(Some("utf-8"))
+}
+
+pub fn parse_keeps_equals_inside_quoted_value_test() {
+  let assert Ok(mt) = mimetype.parse("text/plain; key=\"k=v\"")
+  mt
+  |> mimetype.parameter_of("key")
+  |> should.equal(Some("k=v"))
+}
+
+pub fn parse_quoted_string_with_escaped_quote_test() {
+  let assert Ok(mt) = mimetype.parse("text/plain; key=\"a\\\"b; c\"")
+  mt
+  |> mimetype.parameter_of("key")
+  |> should.equal(Some("a\"b; c"))
+}
+
+pub fn parse_unquoted_value_split_unchanged_test() {
+  // Sanity: previously-correct, fully unquoted parameter lists must
+  // keep parsing as before — the new splitter is only special inside
+  // quoted-strings.
+  let assert Ok(mt) = mimetype.parse("text/html; charset=utf-8; boundary=---")
+  mt
+  |> mimetype.parameter_of("charset")
+  |> should.equal(Some("utf-8"))
+  mt
+  |> mimetype.parameter_of("boundary")
+  |> should.equal(Some("---"))
+}
+
 pub fn family_predicates_use_essence_test() {
   mimetype.is_image(mt("IMAGE/PNG; version=1"))
   |> should.equal(True)

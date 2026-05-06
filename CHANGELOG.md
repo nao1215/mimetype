@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Fixed
+- `mimetype.parse/1` now rejects `Content-Type` strings whose
+  `type/subtype` essence contains internal whitespace, control
+  characters, or any other non-`tchar` byte. The previous
+  implementation only checked that both halves were non-empty, so
+  inputs like `"text/ html"`, `"text /html"`, and `"text/ht\tml"`
+  silently produced `Ok(...)` even though RFC 6838 / RFC 7231 §3.1.1.1
+  require both halves to be `token`s (`1*tchar` per RFC 7230 §3.2.6).
+  These inputs now return `Error(InvalidMimeType(input))`. Valid
+  token essences with the printable-ASCII tchar specials
+  (`!#$%&'*+-.^_\`|~`) — e.g. `application/vnd.api+json` — still
+  parse successfully. (#88)
+
 ## [0.12.0] - 2026-05-04
 
 ### Documentation

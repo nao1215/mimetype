@@ -287,6 +287,34 @@ pub fn parameter_of_unmatched_leading_quote_passes_through_test() {
   |> should.equal(Some("\"utf-8"))
 }
 
+pub fn parse_rejects_whitespace_in_type_test() {
+  mimetype.parse("text /html")
+  |> should.equal(Error(mimetype.InvalidMimeType("text /html")))
+}
+
+pub fn parse_rejects_whitespace_in_subtype_prefix_test() {
+  mimetype.parse("text/ html")
+  |> should.equal(Error(mimetype.InvalidMimeType("text/ html")))
+}
+
+pub fn parse_rejects_whitespace_inside_subtype_test() {
+  mimetype.parse("text/ht ml")
+  |> should.equal(Error(mimetype.InvalidMimeType("text/ht ml")))
+}
+
+pub fn parse_rejects_control_character_in_essence_test() {
+  mimetype.parse("text/ht\tml")
+  |> should.equal(Error(mimetype.InvalidMimeType("text/ht\tml")))
+}
+
+pub fn parse_accepts_valid_token_essence_test() {
+  // Tokens with all the printable-ASCII tchar specials must still pass.
+  let assert Ok(mt) = mimetype.parse("application/vnd.api+json")
+  mt
+  |> mimetype.essence_of
+  |> should.equal("application/vnd.api+json")
+}
+
 pub fn family_predicates_use_essence_test() {
   mimetype.is_image(mt("IMAGE/PNG; version=1"))
   |> should.equal(True)

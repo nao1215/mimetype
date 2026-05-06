@@ -620,8 +620,33 @@ pub fn detect_with_filename_strict(
 
 fn valid_essence(essence: String) -> Bool {
   case string.split_once(essence, on: "/") {
-    Ok(#(t, sub)) -> t != "" && sub != "" && !string.contains(sub, "/")
+    Ok(#(t, sub)) -> valid_token(t) && valid_token(sub)
     Error(Nil) -> False
+  }
+}
+
+/// Check whether `s` is a non-empty `token` per RFC 7230 §3.2.6:
+/// `1*tchar`, where `tchar` is a printable ASCII character that is
+/// neither whitespace, a control character, nor an HTTP separator
+/// (`(` `)` `<` `>` `@` `,` `;` `:` `\` `"` `/` `[` `]` `?` `=` `{` `}`).
+fn valid_token(s: String) -> Bool {
+  use <- bool.guard(when: s == "", return: False)
+  string.to_utf_codepoints(s)
+  |> list.all(fn(cp) { is_tchar(string.utf_codepoint_to_int(cp)) })
+}
+
+fn is_tchar(cp: Int) -> Bool {
+  case cp {
+    // ALPHA
+    cp if cp >= 65 && cp <= 90 -> True
+    cp if cp >= 97 && cp <= 122 -> True
+    // DIGIT
+    cp if cp >= 48 && cp <= 57 -> True
+    // ! # $ % & ' * + - .
+    33 | 35 | 36 | 37 | 38 | 39 | 42 | 43 | 45 | 46 -> True
+    // ^ _ ` | ~
+    94 | 95 | 96 | 124 | 126 -> True
+    _ -> False
   }
 }
 

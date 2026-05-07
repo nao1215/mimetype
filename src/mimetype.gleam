@@ -12,11 +12,6 @@
 //// - magic-number detection, which inspects the leading bytes
 //// - combined helpers, which prefer content-based detection and fall
 ////   back to metadata when the byte signature is unknown
-////
-//// This module is a facade. Per-domain logic — wire-format parsing,
-//// extension/filename lookup, family predicates, and signature
-//// detection — lives under `mimetype/internal/*`. The split is for
-//// reviewer ergonomics; the public surface here is unchanged.
 
 import gleam/bool
 import gleam/list

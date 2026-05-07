@@ -48,6 +48,14 @@ pub type ParseError {
   /// by RFC 6838. The original input is carried so the caller can
   /// render it without re-parsing.
   InvalidMimeType(String)
+  /// A parameter value contained an ASCII control byte that is valid
+  /// in neither `token` nor `quoted-string` per RFC 7231 §3.1.1.1.
+  /// Carries the parameter name and the offending codepoint so the
+  /// caller can render an actionable error like
+  /// "parameter 'charset' contains forbidden control byte 0x01".
+  /// Allowed: HTAB (0x09) and every byte at or above 0x20 except DEL
+  /// (0x7F). Rejected: 0x00-0x08, 0x0A-0x1F, 0x7F.
+  InvalidParameterValue(parameter: String, byte: Int)
 }
 
 /// Reasons the strict detection family can return `Error(_)`.
@@ -116,10 +124,16 @@ pub const default_detection_limit = 3072
 ///
 /// The essence (`type/subtype`) is trimmed and lowercased, and any
 /// `; key=value` parameters are parsed and stored on the value so
-/// later accessors don't have to re-parse. Returns
-/// `Error(EmptyMimeType)` for empty / whitespace-only input and
-/// `Error(InvalidMimeType(original))` when the essence does not have
-/// the `type/subtype` shape required by RFC 6838.
+/// later accessors don't have to re-parse. Returns:
+///
+/// - `Error(EmptyMimeType)` for empty / whitespace-only input.
+/// - `Error(InvalidMimeType(original))` when the essence does not
+///   match the `type/subtype` shape required by RFC 6838.
+/// - `Error(InvalidParameterValue(parameter, byte))` when a parameter
+///   value contains an ASCII control byte that is valid in neither
+///   `token` nor `quoted-string` per RFC 7231 §3.1.1.1 (0x00-0x1F
+///   except HTAB `0x09`, and DEL `0x7F`). These bytes would produce
+///   a malformed `Content-Type` header on the wire.
 pub fn parse(input: String) -> Result(MimeType, ParseError) {
   case parse_internal.parse_string(input) {
     Ok(#(essence, parameters)) ->
@@ -127,6 +141,8 @@ pub fn parse(input: String) -> Result(MimeType, ParseError) {
     Error(parse_internal.Empty) -> Error(EmptyMimeType)
     Error(parse_internal.InvalidEssence(original)) ->
       Error(InvalidMimeType(original))
+    Error(parse_internal.InvalidParameterValue(parameter:, byte:)) ->
+      Error(InvalidParameterValue(parameter: parameter, byte: byte))
   }
 }
 
@@ -565,6 +581,12 @@ fn from_internal(s: String) -> MimeType {
     Error(parse_internal.Empty) ->
       MimeType(essence: s |> string.trim |> string.lowercase, parameters: [])
     Error(parse_internal.InvalidEssence(_)) ->
+      MimeType(essence: s |> string.trim |> string.lowercase, parameters: [])
+    // Internal sources (the magic table, the extension DB) never
+    // include control bytes in parameter values; falling back to the
+    // bare essence here is the conservative path if the data tables
+    // ever drift.
+    Error(parse_internal.InvalidParameterValue(_, _)) ->
       MimeType(essence: s |> string.trim |> string.lowercase, parameters: [])
   }
 }

@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Security:** `mimetype.parse` now rejects parameter values that
+  contain ASCII control bytes (0x00-0x1F except HTAB `0x09`, plus
+  DEL `0x7F`). Those bytes are valid in neither `token` nor
+  `quoted-string` per RFC 7231 §3.1.1.1, and emitting them on the
+  wire produces a malformed `Content-Type` header that downstream
+  HTTP middleware refuses (a CRLF inside a quoted parameter value
+  would otherwise smuggle a forged header). The new error variant
+  `ParseError.InvalidParameterValue(parameter, byte)` names the
+  offending parameter and codepoint so callers can render an
+  actionable diagnostic. HTAB inside a quoted-string is still
+  preserved verbatim (RFC-permitted). Same audit lens as
+  ssevents#67 (CR/LF in data) and oaspec#546 (CR/LF in default
+  HTTP headers); the parameter-value path was the missing
+  companion. (#100)
+
 ## [0.14.0] - 2026-05-07
 
 ### Changed

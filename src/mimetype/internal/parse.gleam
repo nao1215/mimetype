@@ -15,6 +15,8 @@
 
 import gleam/bool
 import gleam/list
+import gleam/option.{type Option, None, Some}
+import gleam/result
 import gleam/string
 
 /// Parse-side failure modes. Internal — the facade translates these
@@ -26,9 +28,22 @@ pub type ParseFailure {
   /// Input did not match the `type/subtype` essence shape; carries
   /// the original string for the caller's `InvalidMimeType` payload.
   InvalidEssence(original: String)
+  /// A parameter value contained an ASCII control byte that is valid
+  /// in neither `token` nor `quoted-string` per RFC 7231 §3.1.1.1.
+  /// `byte` is the offending codepoint (0..31 except 9; or 127);
+  /// `parameter` is the parameter name whose value was rejected so
+  /// the caller can render an actionable error.
+  InvalidParameterValue(parameter: String, byte: Int)
 }
 
 /// Parse a wire-format MIME string into its essence + parameter list.
+///
+/// Rejects parameter values containing ASCII control bytes (0x00-0x1F
+/// except HTAB `0x09`, plus DEL `0x7F`): these are valid in neither
+/// `token` nor `quoted-string` per RFC 7231 §3.1.1.1, and emitting
+/// them on the wire produces a `Content-Type` header that downstream
+/// HTTP libraries refuse. Returns `InvalidParameterValue(parameter,
+/// byte)` naming the offending parameter and the rejected codepoint.
 pub fn parse_string(
   input: String,
 ) -> Result(#(String, List(#(String, String))), ParseFailure) {
@@ -42,7 +57,10 @@ pub fn parse_string(
         when: !valid_essence(essence_value),
         return: Error(InvalidEssence(input)),
       )
-      Ok(#(essence_value, parse_parameters(rest)))
+      case parse_parameters(rest) {
+        Ok(parameters) -> Ok(#(essence_value, parameters))
+        Error(e) -> Error(e)
+      }
     }
   }
 }
@@ -139,21 +157,64 @@ fn is_tchar(cp: Int) -> Bool {
   }
 }
 
-fn parse_parameters(segments: List(String)) -> List(#(String, String)) {
+fn parse_parameters(
+  segments: List(String),
+) -> Result(List(#(String, String)), ParseFailure) {
   segments
-  |> list.filter_map(fn(seg) {
-    case string.split_once(seg, on: "=") {
-      Ok(#(name, value)) -> {
-        let normalized_name = name |> string.trim |> string.lowercase
-        let normalized_value = value |> string.trim |> unquote_value
-        case normalized_name {
-          "" -> Error(Nil)
-          _ -> Ok(#(normalized_name, normalized_value))
+  |> list.try_fold([], parse_parameter_segment)
+  |> result.map(list.reverse)
+}
+
+// Same lenience as the previous `list.filter_map` shape for
+// non-`name=value` and empty-name segments — a stray `;` mid-string
+// should not abort the parse. Forbidden control bytes inside a value
+// abort, naming the offending parameter.
+fn parse_parameter_segment(
+  acc: List(#(String, String)),
+  seg: String,
+) -> Result(List(#(String, String)), ParseFailure) {
+  case string.split_once(seg, on: "=") {
+    Error(Nil) -> Ok(acc)
+    Ok(#(name, value)) -> {
+      let normalized_name = name |> string.trim |> string.lowercase
+      let normalized_value = value |> string.trim |> unquote_value
+      use <- bool.guard(when: normalized_name == "", return: Ok(acc))
+      case forbidden_control_byte(normalized_value) {
+        Some(byte) ->
+          Error(InvalidParameterValue(parameter: normalized_name, byte: byte))
+        None -> Ok([#(normalized_name, normalized_value), ..acc])
+      }
+    }
+  }
+}
+
+/// Return `Some(byte)` for the first ASCII control byte in `s` that is
+/// invalid in a parameter value, or `None` if every byte is allowed.
+/// Allowed: HTAB (0x09) and every byte at or above 0x20 except DEL
+/// (0x7F). Rejected: 0x00-0x08, 0x0A-0x1F, 0x7F.
+fn forbidden_control_byte(s: String) -> Option(Int) {
+  string.to_utf_codepoints(s)
+  |> list.fold(None, fn(found, cp) {
+    case found {
+      Some(_) -> found
+      None -> {
+        let codepoint = string.utf_codepoint_to_int(cp)
+        case is_forbidden_control(codepoint) {
+          True -> Some(codepoint)
+          False -> None
         }
       }
-      Error(Nil) -> Error(Nil)
     }
   })
+}
+
+fn is_forbidden_control(codepoint: Int) -> Bool {
+  case codepoint {
+    9 -> False
+    127 -> True
+    cp if cp < 32 -> True
+    _ -> False
+  }
 }
 
 /// Wrap a parameter value for serialisation per RFC 7230 §3.2.6.

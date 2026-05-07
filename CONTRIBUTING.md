@@ -103,11 +103,41 @@ is at parity right after release), use the `workflow_dispatch` button.
 
 `mimetype` intentionally splits the problem into two layers:
 
-- `src/mimetype.gleam` exposes the public API
-- `src/mimetype/internal/db.gleam` is the Gleam wrapper for the
-  generated extension and reverse lookup tables; the data itself lives
-  in the per-target FFI files `mimetype_db_ffi.erl` and `db_ffi.mjs`
-- `src/mimetype/internal/magic.gleam` contains pure-Gleam byte-signature detection
+- `src/mimetype.gleam` is the public-API facade. It defines the
+  opaque `MimeType` value, `ParseError`, `DetectionError`, `Reader`,
+  the lenient/strict default constants, and a thin wrapper for every
+  `pub fn`. The wrappers delegate to the per-domain modules under
+  `src/mimetype/internal/` — one place per concern, one place per
+  edit:
+  - `internal/parse.gleam` — RFC 7230 §3.2.6 / RFC 6838 wire-format
+    parsing, serialisation, and quoting. Add new parameter-handling
+    rules here.
+  - `internal/lookup.gleam` — extension and filename helpers,
+    including the path/query/fragment normalisation that feeds
+    `filename_to_mime_type`. Add new path-shape handling here.
+  - `internal/predicates.gleam` — family predicates (`is_image`,
+    `is_text`, ...), `is_a`, and the `ancestors` chain over the
+    static hierarchy. Add new family rules here.
+  - `internal/detect.gleam` — byte-signature detection, including
+    the reader-based path. Add new fixed-offset / structural
+    sniffs here.
+  - `internal/db.gleam` — Gleam wrapper for the generated extension
+    and reverse lookup tables; the data itself lives in the
+    per-target FFI files `mimetype_db_ffi.erl` and `db_ffi.mjs`.
+  - `internal/magic.gleam` — pure-Gleam byte-signature signature
+    table that `internal/detect.gleam` consults.
+  - `internal/charset.gleam` — BOM, XML prolog, HTML `<meta>`, and
+    UTF-8 validity-scan charset detection.
+  - `internal/hierarchy.gleam` — static MIME subtype hierarchy
+    consulted by `internal/predicates.gleam`.
+
+The internal modules operate on plain strings and tuples — they do
+not know about the `MimeType` opaque value. The facade builds
+`MimeType` from the strings the internal modules return, which keeps
+the opaque type's constructor scoped to one file. New detection or
+parsing rules should land in the matching `internal/*` module; only
+add to `mimetype.gleam` if you are introducing a new public function
+or reshaping the public surface.
 
 The extension database provides broad coverage. Magic-number detection
 provides content-based correction for common binary formats when the

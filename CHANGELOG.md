@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### Changed
+- **internal**: `src/mimetype.gleam` is now a thin facade. The
+  per-domain logic that previously lived in the same 870-line file —
+  RFC 7230 / RFC 6838 wire-format parsing and serialisation,
+  extension / filename lookup, family predicates and ancestor
+  chains, and byte-signature detection — has moved to dedicated
+  modules under `src/mimetype/internal/`: `parse.gleam`,
+  `lookup.gleam`, `predicates.gleam`, and `detect.gleam`. The facade
+  retains the `MimeType` opaque type, the public error types
+  (`ParseError`, `DetectionError`, `Reader`), and a one-line wrapper
+  for every `pub fn`. **No public API change** — every `mimetype.foo`
+  call resolves identically. Internal-module imports are not part of
+  the public contract; the existing `internal_modules` declaration
+  in `gleam.toml` already documents that. CONTRIBUTING.md is
+  extended with a "where to put new detection rules / new parser
+  logic" section. (#95)
+
 ### Documentation
 - `mimetype.parameter_of` docstring now pins three previously
   under-documented behaviours that callers had to discover by

@@ -114,7 +114,10 @@ The full surface returns an opaque `MimeType`. Use `mimetype.to_string`
 to serialise for an HTTP header; use `mimetype.parse` to construct one
 from a wire-format string. Inspect with `essence_of`, `parameter_of`,
 `charset_of_type`, `is_image`, `is_a`, and the rest of the predicate /
-accessor family.
+accessor family. The `parameter_of` docstring pins the rules for
+duplicate names (first wins), case-insensitive lookup, and value
+whitespace handling — consult it before building anything that round-
+trips parameters.
 
 ```gleam
 import gleam/option.{Some}

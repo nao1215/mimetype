@@ -173,8 +173,24 @@ pub fn essence_of(mt: MimeType) -> String {
 
 /// Look up a parameter value on a `MimeType`. Returns `None` for
 /// missing parameters and for an empty / whitespace-only `key`.
-/// Parameter names are matched case-insensitively; values are
-/// returned with surrounding whitespace stripped but case preserved.
+///
+/// ## Parameter handling
+///
+/// - **Duplicate names**: when the input string carries the same
+///   parameter name twice (e.g. `text/plain; charset=utf-8; charset=ascii`),
+///   the *first* occurrence wins. RFC 7231 does not define a winner,
+///   so this lookup commits to a deterministic rule rather than letting
+///   the result depend on `parse/1`'s storage order.
+/// - **Case-insensitive lookup**: both the `key` argument and the
+///   stored parameter names are normalised to lowercase, so
+///   `parameter_of(parse("text/plain; CHARSET=UTF-8"), "CharSet")`
+///   returns `Some("UTF-8")`. Names are case-insensitive per the spec;
+///   values are returned with their original case preserved.
+/// - **Whitespace on values**: surrounding whitespace is stripped from
+///   the stored value (`text/plain; charset=  utf-8` → `Some("utf-8")`).
+///   Whitespace *inside* a quoted-string is part of the value and is
+///   preserved verbatim (`text/plain; description="hello world"` →
+///   `Some("hello world")`).
 pub fn parameter_of(mt: MimeType, key: String) -> Option(String) {
   let requested = key |> string.trim |> string.lowercase
   use <- bool.lazy_guard(when: requested == "", return: fn() { None })

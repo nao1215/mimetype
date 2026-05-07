@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Documentation
+- `mimetype.parameter_of` docstring now pins three previously
+  under-documented behaviours that callers had to discover by
+  experiment: (a) when an input string carries the same parameter
+  name twice, the first occurrence wins; (b) lookup keys are
+  matched case-insensitively because both the lookup key and the
+  stored names are lowercased at construction time; (c) whitespace
+  *around* a token value is stripped, but whitespace *inside* a
+  quoted-string is preserved verbatim. Four matching regression
+  tests in `test/mimetype_test.gleam` lock the behaviour against
+  silent regressions, and the README cross-links the docstring as
+  the authoritative reference for parameter semantics. (#94)
+
 ### Fixed
 - `mimetype.to_string` is now round-trippable through `parse/1` for
   every parameter value. Previously, values that contained a

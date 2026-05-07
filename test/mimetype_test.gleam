@@ -331,6 +331,44 @@ pub fn to_string_leaves_token_value_unquoted_test() {
   |> should.equal("text/html; charset=utf-8")
 }
 
+pub fn parameter_of_duplicate_name_first_wins_test() {
+  // #94 (a): when the input carries the same parameter name twice,
+  // `parameter_of` returns the FIRST occurrence. Pinned in the
+  // docstring; this test guards against a future regression flipping
+  // the rule to "last wins" silently.
+  let assert Ok(mt) = mimetype.parse("text/plain; charset=utf-8; charset=ascii")
+  mimetype.parameter_of(mt, "charset")
+  |> should.equal(Some("utf-8"))
+}
+
+pub fn parameter_of_lookup_key_case_insensitive_test() {
+  // #94 (b): the lookup key is lowercased before matching, and stored
+  // names are also lowercased at parse time, so a mixed-case key
+  // resolves a mixed-case stored name. Value case is preserved.
+  let assert Ok(mt) = mimetype.parse("text/plain; CHARSET=UTF-8")
+  mimetype.parameter_of(mt, "CharSet")
+  |> should.equal(Some("UTF-8"))
+}
+
+pub fn parameter_of_strips_surrounding_whitespace_on_value_test() {
+  // #94 (c): whitespace AROUND a token value is stripped at parse
+  // time. `string.trim` is symmetric, so leading and trailing
+  // whitespace are both removed.
+  let assert Ok(mt) = mimetype.parse("text/plain; charset=  utf-8  ")
+  mimetype.parameter_of(mt, "charset")
+  |> should.equal(Some("utf-8"))
+}
+
+pub fn parameter_of_preserves_internal_whitespace_in_quoted_value_test() {
+  // #94 (c, continued): whitespace INSIDE a quoted-string is part of
+  // the value and must NOT be collapsed or trimmed. This complements
+  // the trimming rule above — the two together define what
+  // "surrounding whitespace stripped" means.
+  let assert Ok(mt) = mimetype.parse("text/plain; description=\"hello world\"")
+  mimetype.parameter_of(mt, "description")
+  |> should.equal(Some("hello world"))
+}
+
 pub fn parameter_of_lone_quote_passes_through_test() {
   // A bare `"` (length 1) is malformed per RFC 7230 — pass through
   // unchanged so the parser stays tolerant.

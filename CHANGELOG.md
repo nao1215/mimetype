@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-05-07
+
 ### Fixed
 
 - **Security:** `mimetype.parse` now rejects parameter values that

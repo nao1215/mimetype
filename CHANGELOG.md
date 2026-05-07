@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-05-07
+
 ### Documentation
 
 - **mimetype** (public module): drop the "facade" paragraph from the

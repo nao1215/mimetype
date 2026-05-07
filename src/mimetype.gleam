@@ -12,17 +12,21 @@
 //// - magic-number detection, which inspects the leading bytes
 //// - combined helpers, which prefer content-based detection and fall
 ////   back to metadata when the byte signature is unknown
+////
+//// This module is a facade. Per-domain logic — wire-format parsing,
+//// extension/filename lookup, family predicates, and signature
+//// detection — lives under `mimetype/internal/*`. The split is for
+//// reviewer ergonomics; the public surface here is unchanged.
 
-import gleam/bit_array
 import gleam/bool
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
-import mimetype/internal/charset as charset_internal
-import mimetype/internal/db
-import mimetype/internal/hierarchy
-import mimetype/internal/magic
+import mimetype/internal/detect as detect_internal
+import mimetype/internal/lookup as lookup_internal
+import mimetype/internal/parse as parse_internal
+import mimetype/internal/predicates as predicates_internal
 
 /// A normalised, validated MIME type.
 ///
@@ -117,18 +121,12 @@ pub const default_detection_limit = 3072
 /// `Error(InvalidMimeType(original))` when the essence does not have
 /// the `type/subtype` shape required by RFC 6838.
 pub fn parse(input: String) -> Result(MimeType, ParseError) {
-  let trimmed = string.trim(input)
-  use <- bool.guard(when: trimmed == "", return: Error(EmptyMimeType))
-  case split_on_unquoted_semicolons(trimmed) {
-    [] -> Error(EmptyMimeType)
-    [head, ..rest] -> {
-      let essence_value = head |> string.trim |> string.lowercase
-      use <- bool.guard(
-        when: !valid_essence(essence_value),
-        return: Error(InvalidMimeType(input)),
-      )
-      Ok(MimeType(essence: essence_value, parameters: parse_parameters(rest)))
-    }
+  case parse_internal.parse_string(input) {
+    Ok(#(essence, parameters)) ->
+      Ok(MimeType(essence: essence, parameters: parameters))
+    Error(parse_internal.Empty) -> Error(EmptyMimeType)
+    Error(parse_internal.InvalidEssence(original)) ->
+      Error(InvalidMimeType(original))
   }
 }
 
@@ -144,20 +142,7 @@ pub fn parse(input: String) -> Result(MimeType, ParseError) {
 /// unchanged so the common case (`charset=utf-8`, `boundary=abc123`)
 /// stays unquoted.
 pub fn to_string(mt: MimeType) -> String {
-  let MimeType(essence_value, parameters) = mt
-  case parameters {
-    [] -> essence_value
-    _ -> {
-      let serialised_parameters =
-        parameters
-        |> list.map(fn(p) {
-          let #(k, v) = p
-          k <> "=" <> quote_value(v)
-        })
-        |> string.join("; ")
-      essence_value <> "; " <> serialised_parameters
-    }
-  }
+  parse_internal.serialise(mt.essence, mt.parameters)
 }
 
 // ---------------------------------------------------------------------------
@@ -167,8 +152,7 @@ pub fn to_string(mt: MimeType) -> String {
 /// Return the bare essence (`type/subtype`) of a `MimeType`, with all
 /// parameters stripped. The result is already trimmed and lowercased.
 pub fn essence_of(mt: MimeType) -> String {
-  let MimeType(essence_value, _) = mt
-  essence_value
+  mt.essence
 }
 
 /// Look up a parameter value on a `MimeType`. Returns `None` for
@@ -194,8 +178,7 @@ pub fn essence_of(mt: MimeType) -> String {
 pub fn parameter_of(mt: MimeType, key: String) -> Option(String) {
   let requested = key |> string.trim |> string.lowercase
   use <- bool.lazy_guard(when: requested == "", return: fn() { None })
-  let MimeType(_, parameters) = mt
-  parameters
+  mt.parameters
   |> list.find_map(fn(p) {
     let #(name, value) = p
     case name == requested {
@@ -222,22 +205,22 @@ pub fn charset_of_type(mt: MimeType) -> Option(String) {
 
 /// Return `True` when the MIME type's top-level media type is `image`.
 pub fn is_image(mt: MimeType) -> Bool {
-  string.starts_with(essence_of(mt), "image/")
+  predicates_internal.is_image_essence(mt.essence)
 }
 
 /// Return `True` when the MIME type's top-level media type is `text`.
 pub fn is_text(mt: MimeType) -> Bool {
-  string.starts_with(essence_of(mt), "text/")
+  predicates_internal.is_text_essence(mt.essence)
 }
 
 /// Return `True` when the MIME type's top-level media type is `audio`.
 pub fn is_audio(mt: MimeType) -> Bool {
-  string.starts_with(essence_of(mt), "audio/")
+  predicates_internal.is_audio_essence(mt.essence)
 }
 
 /// Return `True` when the MIME type's top-level media type is `video`.
 pub fn is_video(mt: MimeType) -> Bool {
-  string.starts_with(essence_of(mt), "video/")
+  predicates_internal.is_video_essence(mt.essence)
 }
 
 /// Return `True` when `mime` is `parent` or transitively inherits from
@@ -247,11 +230,7 @@ pub fn is_video(mt: MimeType) -> Bool {
 /// non-empty `x`) and transitive (if `a` inherits from `b` and `b`
 /// inherits from `c`, then `is_a(a, c)` is `True`).
 pub fn is_a(mime: MimeType, parent: MimeType) -> Bool {
-  let mime_essence = essence_of(mime)
-  let parent_essence = essence_of(parent)
-  use <- bool.guard(when: mime_essence == "", return: False)
-  use <- bool.guard(when: parent_essence == "", return: False)
-  is_a_loop(mime_essence, parent_essence)
+  predicates_internal.is_a(mime.essence, parent.essence)
 }
 
 /// Return `True` when `mime` is, or inherits from, `application/zip`.
@@ -260,7 +239,7 @@ pub fn is_a(mime: MimeType, parent: MimeType) -> Bool {
 /// Returns `True` for `.docx` / `.xlsx` / `.epub` / `.apk` and other
 /// ZIP-based container formats.
 pub fn is_zip_based(mime: MimeType) -> Bool {
-  is_a_loop(essence_of(mime), "application/zip")
+  predicates_internal.is_a(mime.essence, "application/zip")
 }
 
 /// Return `True` when `mime` is, or inherits from, an XML media type.
@@ -269,9 +248,8 @@ pub fn is_zip_based(mime: MimeType) -> Bool {
 /// in line with RFC 7303 which permits both. Returns `True` for
 /// `image/svg+xml` and any other `*+xml` types added to the hierarchy.
 pub fn is_xml_based(mime: MimeType) -> Bool {
-  let mime_essence = essence_of(mime)
-  is_a_loop(mime_essence, "text/xml")
-  || is_a_loop(mime_essence, "application/xml")
+  predicates_internal.is_a(mime.essence, "text/xml")
+  || predicates_internal.is_a(mime.essence, "application/xml")
 }
 
 /// Return the chain of ancestors of `mime`, ordered from immediate
@@ -281,9 +259,8 @@ pub fn is_xml_based(mime: MimeType) -> Bool {
 /// include `mime` itself; use `is_a(mime, mime)` (always `True`) if
 /// you need reflexive membership.
 pub fn ancestors(mime: MimeType) -> List(MimeType) {
-  let mime_essence = essence_of(mime)
-  use <- bool.guard(when: mime_essence == "", return: [])
-  ancestors_loop(mime_essence, [])
+  predicates_internal.ancestors(mime.essence)
+  |> list.map(from_essence)
 }
 
 // ---------------------------------------------------------------------------
@@ -314,14 +291,7 @@ pub fn ancestors(mime: MimeType) -> List(MimeType) {
 /// media type via `parameter_of` / `charset_of_type` rather than as a
 /// standalone MIME value.
 pub fn charset_of(bytes: BitArray) -> Result(String, DetectionError(Nil)) {
-  use <- bool.guard(
-    when: bit_array.byte_size(bytes) == 0,
-    return: Error(EmptyInput),
-  )
-  case charset_internal.detect(bytes) {
-    Ok(charset) -> Ok(charset)
-    Error(Nil) -> Error(NoMatch)
-  }
+  detect_internal.charset_of(bytes) |> result.map_error(detect_failure_to_error)
 }
 
 // ---------------------------------------------------------------------------
@@ -334,13 +304,8 @@ pub fn charset_of(bytes: BitArray) -> Result(String, DetectionError(Nil)) {
 /// before lookup. Unknown / empty inputs fall back to
 /// `default_mime_type`.
 pub fn extension_to_mime_type(extension: String) -> MimeType {
-  case extension_to_mime_type_strict(extension) {
-    Ok(mt) -> mt
-    Error(NoMatch) -> default_mime_type
-    Error(UnknownExtension(_)) -> default_mime_type
-    Error(EmptyInput) -> default_mime_type
-    Error(ReaderError(_)) -> default_mime_type
-  }
+  extension_to_mime_type_strict(extension)
+  |> result.unwrap(default_mime_type)
 }
 
 /// Look up a `MimeType` from a file extension.
@@ -353,9 +318,9 @@ pub fn extension_to_mime_type(extension: String) -> MimeType {
 pub fn extension_to_mime_type_strict(
   extension: String,
 ) -> Result(MimeType, DetectionError(Nil)) {
-  let normalized = normalize_extension(extension)
+  let normalized = lookup_internal.normalize_extension(extension)
   use <- bool.guard(when: normalized == "", return: Error(EmptyInput))
-  case db.extension_to_mime_type(normalized) {
+  case lookup_internal.essence_for_extension(normalized) {
     Ok(s) -> Ok(from_internal(s))
     Error(Nil) -> Error(UnknownExtension(normalized))
   }
@@ -368,10 +333,7 @@ pub fn extension_to_mime_type_strict(
 /// Return all known extensions for a `MimeType`. Unknown MIME types
 /// return the empty list.
 pub fn mime_type_to_extensions(mt: MimeType) -> List(String) {
-  case mime_type_to_extensions_strict(mt) {
-    Ok(extensions) -> extensions
-    Error(Nil) -> []
-  }
+  mime_type_to_extensions_strict(mt) |> result.unwrap([])
 }
 
 /// Return all known extensions for a `MimeType`.
@@ -379,7 +341,7 @@ pub fn mime_type_to_extensions(mt: MimeType) -> List(String) {
 /// Strict variant; returns `Error(Nil)` when the essence is not in the
 /// generated database.
 pub fn mime_type_to_extensions_strict(mt: MimeType) -> Result(List(String), Nil) {
-  db.mime_type_to_extensions(essence_of(mt))
+  lookup_internal.extensions_for_essence(mt.essence)
 }
 
 // ---------------------------------------------------------------------------
@@ -393,13 +355,7 @@ pub fn mime_type_to_extensions_strict(mt: MimeType) -> Result(List(String), Nil)
 /// a real extension, such as `.gitignore`, fall back to
 /// `default_mime_type`.
 pub fn filename_to_mime_type(path: String) -> MimeType {
-  case filename_to_mime_type_strict(path) {
-    Ok(mt) -> mt
-    Error(NoMatch) -> default_mime_type
-    Error(UnknownExtension(_)) -> default_mime_type
-    Error(EmptyInput) -> default_mime_type
-    Error(ReaderError(_)) -> default_mime_type
-  }
+  filename_to_mime_type_strict(path) |> result.unwrap(default_mime_type)
 }
 
 /// Look up a `MimeType` from the last extension component of a path
@@ -412,7 +368,7 @@ pub fn filename_to_mime_type(path: String) -> MimeType {
 pub fn filename_to_mime_type_strict(
   path: String,
 ) -> Result(MimeType, DetectionError(Nil)) {
-  case extension_from_filename(path) {
+  case lookup_internal.extension_from_filename(path) {
     Some(extension) -> extension_to_mime_type_strict(extension)
     None -> Error(EmptyInput)
   }
@@ -453,13 +409,7 @@ pub fn detect_strict(bytes: BitArray) -> Result(MimeType, DetectionError(Nil)) {
 /// signature can match and `default_mime_type` is returned. Limits
 /// larger than the input are clamped to the input length.
 pub fn detect_with_limit(bytes: BitArray, limit: Int) -> MimeType {
-  case detect_with_limit_strict(bytes, limit) {
-    Ok(mt) -> mt
-    Error(NoMatch) -> default_mime_type
-    Error(UnknownExtension(_)) -> default_mime_type
-    Error(EmptyInput) -> default_mime_type
-    Error(ReaderError(_)) -> default_mime_type
-  }
+  detect_with_limit_strict(bytes, limit) |> result.unwrap(default_mime_type)
 }
 
 /// Detect a `MimeType` from at most `limit` leading bytes.
@@ -471,14 +421,9 @@ pub fn detect_with_limit_strict(
   bytes: BitArray,
   limit: Int,
 ) -> Result(MimeType, DetectionError(Nil)) {
-  use <- bool.guard(
-    when: bit_array.byte_size(bytes) == 0,
-    return: Error(EmptyInput),
-  )
-  case magic.detect(truncate_to_limit(bytes, limit)) {
-    Some(s) -> Ok(from_internal(s))
-    None -> Error(NoMatch)
-  }
+  detect_internal.detect_essence_with_limit(bytes, limit)
+  |> result.map(from_internal)
+  |> result.map_error(detect_failure_to_error)
 }
 
 /// Detect a `MimeType` from a genuine binary or structural signature
@@ -504,14 +449,9 @@ pub fn detect_signature_only_with_limit(
   bytes: BitArray,
   limit: Int,
 ) -> Result(MimeType, DetectionError(Nil)) {
-  use <- bool.guard(
-    when: bit_array.byte_size(bytes) == 0,
-    return: Error(EmptyInput),
-  )
-  case magic.detect_signature(truncate_to_limit(bytes, limit)) {
-    Some(s) -> Ok(from_internal(s))
-    None -> Error(NoMatch)
-  }
+  detect_internal.detect_signature_only_with_limit(bytes, limit)
+  |> result.map(from_internal)
+  |> result.map_error(detect_failure_to_error)
 }
 
 /// Detect a `MimeType` by pulling at most `limit` leading bytes
@@ -521,13 +461,7 @@ pub fn detect_signature_only_with_limit(
 /// count. If the reader returns an error, `default_mime_type` is
 /// returned.
 pub fn detect_reader(read: Reader(read_error), limit: Int) -> MimeType {
-  case detect_reader_strict(read, limit) {
-    Ok(mt) -> mt
-    Error(NoMatch) -> default_mime_type
-    Error(UnknownExtension(_)) -> default_mime_type
-    Error(EmptyInput) -> default_mime_type
-    Error(ReaderError(_)) -> default_mime_type
-  }
+  detect_reader_strict(read, limit) |> result.unwrap(default_mime_type)
 }
 
 /// Detect a `MimeType` by pulling at most `limit` leading bytes
@@ -542,22 +476,9 @@ pub fn detect_reader_strict(
   read: Reader(read_error),
   limit: Int,
 ) -> Result(MimeType, DetectionError(read_error)) {
-  let safe_limit = case limit < 1 {
-    True -> 0
-    False -> limit
-  }
-  case read(safe_limit) {
-    Ok(bytes) ->
-      case detect_with_limit_strict(bytes, safe_limit) {
-        Ok(mt) -> Ok(mt)
-        Error(EmptyInput) -> Error(EmptyInput)
-        Error(NoMatch) -> Error(NoMatch)
-        Error(UnknownExtension(extension)) -> Error(UnknownExtension(extension))
-        // Unreachable: detect_with_limit_strict never produces ReaderError.
-        Error(ReaderError(_)) -> Error(NoMatch)
-      }
-    Error(read_error) -> Error(ReaderError(read_error))
-  }
+  detect_internal.detect_essence_via_reader(read, limit)
+  |> result.map(from_internal)
+  |> result.map_error(detect_failure_to_error)
 }
 
 /// Detect a `MimeType` from bytes, consulting an explicit extension
@@ -573,13 +494,8 @@ pub fn detect_reader_strict(
 /// resort when neither the byte signature nor the extension is
 /// recognisable.
 pub fn detect_with_extension(bytes: BitArray, extension: String) -> MimeType {
-  case detect_with_extension_strict(bytes, extension) {
-    Ok(mt) -> mt
-    Error(NoMatch) -> default_mime_type
-    Error(UnknownExtension(_)) -> default_mime_type
-    Error(EmptyInput) -> default_mime_type
-    Error(ReaderError(_)) -> default_mime_type
-  }
+  detect_with_extension_strict(bytes, extension)
+  |> result.unwrap(default_mime_type)
 }
 
 /// Detect a `MimeType` from bytes, consulting an explicit extension
@@ -612,13 +528,8 @@ pub fn detect_with_extension_strict(
 /// neither the byte signature nor the filename's extension is
 /// recognisable.
 pub fn detect_with_filename(bytes: BitArray, filename: String) -> MimeType {
-  case detect_with_filename_strict(bytes, filename) {
-    Ok(mt) -> mt
-    Error(NoMatch) -> default_mime_type
-    Error(UnknownExtension(_)) -> default_mime_type
-    Error(EmptyInput) -> default_mime_type
-    Error(ReaderError(_)) -> default_mime_type
-  }
+  detect_with_filename_strict(bytes, filename)
+  |> result.unwrap(default_mime_type)
 }
 
 /// Detect a `MimeType` from bytes, consulting the filename extension
@@ -638,146 +549,8 @@ pub fn detect_with_filename_strict(
 }
 
 // ---------------------------------------------------------------------------
-// Internal helpers
+// Internal helpers (facade-only, depend on the opaque MimeType)
 // ---------------------------------------------------------------------------
-
-/// Split on top-level `;` while keeping `;` characters that appear
-/// inside an RFC 7230 §3.2.6 quoted-string (`"..."`) attached to the
-/// surrounding value. Backslash escapes (`\"`, `\\`, `\;` etc.) within
-/// a quoted-string are honoured so the next character does not toggle
-/// the quote state.
-fn split_on_unquoted_semicolons(s: String) -> List(String) {
-  do_split_semis(s, "", [], False, False)
-  |> list.reverse
-}
-
-fn do_split_semis(
-  remaining: String,
-  current: String,
-  acc: List(String),
-  in_quote: Bool,
-  escape: Bool,
-) -> List(String) {
-  case string.pop_grapheme(remaining) {
-    Error(Nil) -> [current, ..acc]
-    Ok(#(g, rest)) ->
-      case escape, g, in_quote {
-        True, _, _ -> do_split_semis(rest, current <> g, acc, in_quote, False)
-        False, "\\", True ->
-          do_split_semis(rest, current <> g, acc, in_quote, True)
-        False, "\"", _ ->
-          do_split_semis(rest, current <> g, acc, !in_quote, False)
-        False, ";", False ->
-          do_split_semis(rest, "", [current, ..acc], False, False)
-        False, _, _ -> do_split_semis(rest, current <> g, acc, in_quote, False)
-      }
-  }
-}
-
-fn valid_essence(essence: String) -> Bool {
-  case string.split_once(essence, on: "/") {
-    Ok(#(t, sub)) -> valid_token(t) && valid_token(sub)
-    Error(Nil) -> False
-  }
-}
-
-/// Check whether `s` is a non-empty `token` per RFC 7230 §3.2.6:
-/// `1*tchar`, where `tchar` is a printable ASCII character that is
-/// neither whitespace, a control character, nor an HTTP separator
-/// (`(` `)` `<` `>` `@` `,` `;` `:` `\` `"` `/` `[` `]` `?` `=` `{` `}`).
-fn valid_token(s: String) -> Bool {
-  use <- bool.guard(when: s == "", return: False)
-  string.to_utf_codepoints(s)
-  |> list.all(fn(cp) { is_tchar(string.utf_codepoint_to_int(cp)) })
-}
-
-fn is_tchar(cp: Int) -> Bool {
-  case cp {
-    // ALPHA
-    cp if cp >= 65 && cp <= 90 -> True
-    cp if cp >= 97 && cp <= 122 -> True
-    // DIGIT
-    cp if cp >= 48 && cp <= 57 -> True
-    // ! # $ % & ' * + - .
-    33 | 35 | 36 | 37 | 38 | 39 | 42 | 43 | 45 | 46 -> True
-    // ^ _ ` | ~
-    94 | 95 | 96 | 124 | 126 -> True
-    _ -> False
-  }
-}
-
-fn parse_parameters(segments: List(String)) -> List(#(String, String)) {
-  segments
-  |> list.filter_map(fn(seg) {
-    case string.split_once(seg, on: "=") {
-      Ok(#(name, value)) -> {
-        let normalized_name = name |> string.trim |> string.lowercase
-        let normalized_value = value |> string.trim |> unquote_value
-        case normalized_name {
-          "" -> Error(Nil)
-          _ -> Ok(#(normalized_name, normalized_value))
-        }
-      }
-      Error(Nil) -> Error(Nil)
-    }
-  })
-}
-
-/// Wrap a parameter value for serialisation per RFC 7230 §3.2.6.
-///
-/// Values that satisfy `valid_token` are returned unchanged so the
-/// common `charset=utf-8` shape stays terse. Anything else — including
-/// the empty string, whitespace, `;`, `,`, and any other token-illegal
-/// character — is wrapped in `"..."` with inner `"` and `\` escaped
-/// with a leading backslash. The result round-trips through
-/// `unquote_value` and therefore through `parse/1`.
-fn quote_value(value: String) -> String {
-  use <- bool.guard(when: valid_token(value), return: value)
-  "\"" <> escape_quoted(value, "") <> "\""
-}
-
-fn escape_quoted(remaining: String, acc: String) -> String {
-  case string.pop_grapheme(remaining) {
-    Error(Nil) -> acc
-    Ok(#("\"", rest)) -> escape_quoted(rest, acc <> "\\\"")
-    Ok(#("\\", rest)) -> escape_quoted(rest, acc <> "\\\\")
-    Ok(#(other, rest)) -> escape_quoted(rest, acc <> other)
-  }
-}
-
-/// Unwrap a parameter value from RFC 7230 §3.2.6 quoted-string form.
-///
-/// If `value` is delimited by surrounding `"`, strip them and decode any
-/// backslash escapes inside (`\X` → `X`). Values that are not delimited
-/// (token form per RFC 7230 §3.2.6) pass through unchanged. Malformed
-/// inputs — a leading `"` without a matching trailing `"`, or a trailing
-/// `\` with nothing after it — also pass through unchanged so the parser
-/// remains tolerant of off-spec wire input.
-fn unquote_value(value: String) -> String {
-  use <- bool.guard(
-    when: !{ string.starts_with(value, "\"") && string.ends_with(value, "\"") },
-    return: value,
-  )
-  // Reject the lone `"` case (length 1: starts AND ends match the
-  // same character, so the slice is empty but we'd otherwise
-  // discard the original character).
-  use <- bool.guard(when: string.length(value) < 2, return: value)
-  let inner = value |> string.drop_start(1) |> string.drop_end(1)
-  unescape_quoted(inner, "")
-}
-
-fn unescape_quoted(remaining: String, acc: String) -> String {
-  case string.pop_grapheme(remaining) {
-    Error(Nil) -> acc
-    Ok(#("\\", rest)) ->
-      case string.pop_grapheme(rest) {
-        Ok(#(escaped, after)) -> unescape_quoted(after, acc <> escaped)
-        // Trailing lone backslash: keep it as-is.
-        Error(Nil) -> acc <> "\\"
-      }
-    Ok(#(other, rest)) -> unescape_quoted(rest, acc <> other)
-  }
-}
 
 /// Build a `MimeType` from a string produced by an internal source
 /// (the magic table, the extension DB, ...) that is expected to be
@@ -786,11 +559,12 @@ fn unescape_quoted(remaining: String, acc: String) -> String {
 /// drift, in which case returning a `MimeType` with the raw essence
 /// is more useful than panicking at a detection site.
 fn from_internal(s: String) -> MimeType {
-  case parse(s) {
-    Ok(mt) -> mt
-    Error(EmptyMimeType) ->
+  case parse_internal.parse_string(s) {
+    Ok(#(essence, parameters)) ->
+      MimeType(essence: essence, parameters: parameters)
+    Error(parse_internal.Empty) ->
       MimeType(essence: s |> string.trim |> string.lowercase, parameters: [])
-    Error(InvalidMimeType(_)) ->
+    Error(parse_internal.InvalidEssence(_)) ->
       MimeType(essence: s |> string.trim |> string.lowercase, parameters: [])
   }
 }
@@ -802,69 +576,14 @@ fn from_essence(essence_value: String) -> MimeType {
   MimeType(essence: essence_value, parameters: [])
 }
 
-fn is_a_loop(mime: String, parent: String) -> Bool {
-  use <- bool.lazy_guard(when: mime == parent, return: fn() { True })
-  case hierarchy.parent_of(mime) {
-    Ok(next) -> is_a_loop(next, parent)
-    Error(Nil) -> False
-  }
-}
-
-fn ancestors_loop(mime: String, acc: List(MimeType)) -> List(MimeType) {
-  case hierarchy.parent_of(mime) {
-    Ok(parent) -> ancestors_loop(parent, [from_essence(parent), ..acc])
-    Error(Nil) -> list.reverse(acc)
-  }
-}
-
-fn truncate_to_limit(bytes: BitArray, limit: Int) -> BitArray {
-  let size = bit_array.byte_size(bytes)
-  let safe_limit = case limit < 0, limit > size {
-    True, _ -> 0
-    False, True -> size
-    False, False -> limit
-  }
-  bit_array.slice(bytes, 0, safe_limit) |> result.unwrap(<<>>)
-}
-
-fn normalize_extension(extension: String) -> String {
-  extension |> string.trim |> strip_leading_dots |> string.lowercase
-}
-
-fn strip_leading_dots(value: String) -> String {
-  use <- bool.lazy_guard(when: string.starts_with(value, "."), return: fn() {
-    strip_leading_dots(string.drop_start(value, 1))
-  })
-  value
-}
-
-fn extension_from_filename(path: String) -> Option(String) {
-  let name = basename(path)
-  case list.reverse(string.split(name, ".")) {
-    [] -> None
-    [_single] -> None
-    ["", ..] -> None
-    [extension, ..rest] ->
-      case rest {
-        [""] -> None
-        _ -> Some(normalize_extension(extension))
-      }
-  }
-}
-
-fn basename(path: String) -> String {
-  let without_fragment = split_head(path, on: "#")
-  let without_query = split_head(without_fragment, on: "?")
-  let normalized = string.replace(without_query, "\\", "/")
-  case list.reverse(string.split(normalized, "/")) {
-    [name, ..] -> name
-    [] -> normalized
-  }
-}
-
-fn split_head(value: String, on marker: String) -> String {
-  case string.split_once(value, on: marker) {
-    Ok(#(head, _)) -> head
-    Error(Nil) -> value
+/// Translate an `internal/detect` failure into the public
+/// `DetectionError` shape.
+fn detect_failure_to_error(
+  failure: detect_internal.DetectFailure(read_error),
+) -> DetectionError(read_error) {
+  case failure {
+    detect_internal.Empty -> EmptyInput
+    detect_internal.NoSignatureMatch -> NoMatch
+    detect_internal.ReadFailed(e) -> ReaderError(e)
   }
 }

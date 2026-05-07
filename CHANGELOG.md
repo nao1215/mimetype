@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Documentation
+
+- **mimetype** (public module): drop the "facade" paragraph from the
+  top-level `////` doc that leaked the internal layout (referencing
+  `mimetype/internal/*` and "reviewer ergonomics") into the published
+  docs. The split between public surface and internal helpers is an
+  implementation detail and shouldn't show up on hexdocs. (#103)
+
 ## [0.15.0] - 2026-05-07
 
 ### Fixed

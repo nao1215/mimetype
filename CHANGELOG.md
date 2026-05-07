@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Fixed
+- `mimetype.to_string` is now round-trippable through `parse/1` for
+  every parameter value. Previously, values that contained a
+  token-illegal character (whitespace, `;`, `,`, `"`, `\`, `=`, etc.)
+  were emitted unquoted, so a value like `"a;b"` came out as
+  `payload=a;b` and the next `parse/1` split at the literal `;`,
+  losing `";b"`. The serialiser now applies RFC 7230 §3.2.6
+  quoted-string rules: token-valid values pass through unchanged
+  (e.g. `charset=utf-8`), and anything else — including the empty
+  string — is wrapped in `"..."` with inner `"` and `\`
+  backslash-escaped. This is the symmetric counterpart of the
+  existing `unquote_value` parser path, so the round-trip property
+  documented in `to_string`'s docstring now actually holds. (#93)
+
 ## [0.13.0] - 2026-05-06
 
 ### Fixed

@@ -272,6 +272,65 @@ pub fn parse_then_to_string_then_parse_quoted_value_round_trips_test() {
   |> should.equal(Some("utf-8"))
 }
 
+pub fn to_string_quotes_value_with_semicolon_test() {
+  // #93: parameter values containing `;` must be quoted on output, or
+  // a re-parse would split the value at the `;`.
+  let assert Ok(mt1) = mimetype.parse("application/json; payload=\"a;b\"")
+  let serialised = mimetype.to_string(mt1)
+  let assert Ok(mt2) = mimetype.parse(serialised)
+  mimetype.parameter_of(mt2, "payload")
+  |> should.equal(Some("a;b"))
+}
+
+pub fn to_string_quotes_value_with_whitespace_test() {
+  // RFC 7230 token disallows whitespace; a value with a space must be
+  // wrapped in quoted-string so the round-trip preserves it.
+  let assert Ok(mt1) = mimetype.parse("application/json; tag=\"hello world\"")
+  let serialised = mimetype.to_string(mt1)
+  let assert Ok(mt2) = mimetype.parse(serialised)
+  mimetype.parameter_of(mt2, "tag")
+  |> should.equal(Some("hello world"))
+}
+
+pub fn to_string_escapes_inner_quote_test() {
+  // Inner `"` in a value must be backslash-escaped so the closing `"`
+  // delimiter isn't confused with a literal one inside the value.
+  let assert Ok(mt1) = mimetype.parse("application/json; tag=\"a\\\"b\"")
+  let serialised = mimetype.to_string(mt1)
+  let assert Ok(mt2) = mimetype.parse(serialised)
+  mimetype.parameter_of(mt2, "tag")
+  |> should.equal(Some("a\"b"))
+}
+
+pub fn to_string_escapes_inner_backslash_test() {
+  // Inner `\` must be doubled or it would consume the following byte
+  // on re-parse via `unquote_value`.
+  let assert Ok(mt1) = mimetype.parse("application/json; tag=\"a\\\\b\"")
+  let serialised = mimetype.to_string(mt1)
+  let assert Ok(mt2) = mimetype.parse(serialised)
+  mimetype.parameter_of(mt2, "tag")
+  |> should.equal(Some("a\\b"))
+}
+
+pub fn to_string_quotes_empty_parameter_value_test() {
+  // Empty value is not a valid token (`1*tchar`), so it must be
+  // serialised as the empty quoted-string `""`.
+  let assert Ok(mt1) = mimetype.parse("application/json; tag=\"\"")
+  let serialised = mimetype.to_string(mt1)
+  let assert Ok(mt2) = mimetype.parse(serialised)
+  mimetype.parameter_of(mt2, "tag")
+  |> should.equal(Some(""))
+}
+
+pub fn to_string_leaves_token_value_unquoted_test() {
+  // Token-valid values (alphanum + safe punctuation) must pass through
+  // without gaining quotes — the common `charset=utf-8` shape stays
+  // identical to the input.
+  let assert Ok(mt1) = mimetype.parse("text/html; charset=utf-8")
+  mimetype.to_string(mt1)
+  |> should.equal("text/html; charset=utf-8")
+}
+
 pub fn parameter_of_lone_quote_passes_through_test() {
   // A bare `"` (length 1) is malformed per RFC 7230 — pass through
   // unchanged so the parser stays tolerant.

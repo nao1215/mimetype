@@ -136,6 +136,13 @@ pub fn parse(input: String) -> Result(MimeType, ParseError) {
 /// always normalises whitespace ("`type/subtype; key=value`" with a
 /// single space after each semicolon) and is round-trippable through
 /// `parse/1`.
+///
+/// Parameter values that are not a valid `token` per RFC 7230 §3.2.6
+/// (including the empty string and any value containing whitespace,
+/// `;`, `,`, `"`, etc.) are wrapped in a quoted-string with inner
+/// `"` and `\` backslash-escaped. Token-valid values pass through
+/// unchanged so the common case (`charset=utf-8`, `boundary=abc123`)
+/// stays unquoted.
 pub fn to_string(mt: MimeType) -> String {
   let MimeType(essence_value, parameters) = mt
   case parameters {
@@ -145,7 +152,7 @@ pub fn to_string(mt: MimeType) -> String {
         parameters
         |> list.map(fn(p) {
           let #(k, v) = p
-          k <> "=" <> v
+          k <> "=" <> quote_value(v)
         })
         |> string.join("; ")
       essence_value <> "; " <> serialised_parameters
@@ -698,6 +705,28 @@ fn parse_parameters(segments: List(String)) -> List(#(String, String)) {
       Error(Nil) -> Error(Nil)
     }
   })
+}
+
+/// Wrap a parameter value for serialisation per RFC 7230 §3.2.6.
+///
+/// Values that satisfy `valid_token` are returned unchanged so the
+/// common `charset=utf-8` shape stays terse. Anything else — including
+/// the empty string, whitespace, `;`, `,`, and any other token-illegal
+/// character — is wrapped in `"..."` with inner `"` and `\` escaped
+/// with a leading backslash. The result round-trips through
+/// `unquote_value` and therefore through `parse/1`.
+fn quote_value(value: String) -> String {
+  use <- bool.guard(when: valid_token(value), return: value)
+  "\"" <> escape_quoted(value, "") <> "\""
+}
+
+fn escape_quoted(remaining: String, acc: String) -> String {
+  case string.pop_grapheme(remaining) {
+    Error(Nil) -> acc
+    Ok(#("\"", rest)) -> escape_quoted(rest, acc <> "\\\"")
+    Ok(#("\\", rest)) -> escape_quoted(rest, acc <> "\\\\")
+    Ok(#(other, rest)) -> escape_quoted(rest, acc <> other)
+  }
 }
 
 /// Unwrap a parameter value from RFC 7230 §3.2.6 quoted-string form.

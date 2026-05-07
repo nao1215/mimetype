@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-05-07
+
 ### Changed
 - **internal**: `src/mimetype.gleam` is now a thin facade. The
   per-domain logic that previously lived in the same 870-line file —

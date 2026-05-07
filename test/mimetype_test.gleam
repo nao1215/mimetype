@@ -404,6 +404,71 @@ pub fn parse_rejects_control_character_in_essence_test() {
   |> should.equal(Error(mimetype.InvalidMimeType("text/ht\tml")))
 }
 
+// Issue #100: parameter values must reject ASCII control bytes that
+// are valid in neither `token` nor `quoted-string` per RFC 7231
+// §3.1.1.1. Allowed: HTAB (0x09) inside a quoted-string. Rejected:
+// 0x00-0x08, 0x0A-0x1F, 0x7F.
+
+pub fn parse_rejects_nul_byte_in_parameter_value_test() {
+  mimetype.parse("text/html; charset=\u{0000}")
+  |> should.equal(
+    Error(mimetype.InvalidParameterValue(parameter: "charset", byte: 0)),
+  )
+}
+
+pub fn parse_rejects_soh_byte_in_parameter_value_test() {
+  // 0x01 SOH inside an unquoted parameter value.
+  mimetype.parse("text/html; charset=\u{0001}\u{0002}")
+  |> should.equal(
+    Error(mimetype.InvalidParameterValue(parameter: "charset", byte: 1)),
+  )
+}
+
+pub fn parse_rejects_unit_separator_in_quoted_value_test() {
+  // 0x1F US — control byte permitted in neither token nor
+  // quoted-string. Even inside quotes the parser must reject.
+  mimetype.parse("text/html; charset=\"utf-\u{001F}-8\"")
+  |> should.equal(
+    Error(mimetype.InvalidParameterValue(parameter: "charset", byte: 0x1F)),
+  )
+}
+
+pub fn parse_rejects_del_byte_in_parameter_value_test() {
+  mimetype.parse("text/html; charset=u\u{007F}f-8")
+  |> should.equal(
+    Error(mimetype.InvalidParameterValue(parameter: "charset", byte: 0x7F)),
+  )
+}
+
+pub fn parse_accepts_htab_inside_quoted_value_test() {
+  // HTAB (0x09) is the one control byte allowed inside a
+  // quoted-string per RFC 7230 §3.2.6. The parameter value should
+  // round-trip with the tab preserved.
+  let assert Ok(mt) = mimetype.parse("text/html; description=\"a\u{0009}b\"")
+  mt
+  |> mimetype.parameter_of("description")
+  |> should.equal(Some("a\u{0009}b"))
+}
+
+pub fn parse_rejects_lf_byte_in_quoted_parameter_value_test() {
+  // 0x0A LF — would be the headline CRLF-injection footgun.
+  mimetype.parse("text/html; charset=\"u\u{000A}tf-8\"")
+  |> should.equal(
+    Error(mimetype.InvalidParameterValue(parameter: "charset", byte: 0x0A)),
+  )
+}
+
+pub fn parse_error_reports_first_offending_parameter_test() {
+  // When two parameters both contain forbidden bytes, the diagnostic
+  // names the FIRST one in input order. Pin this so a future change
+  // to the iteration order surfaces here instead of as a flaky
+  // diagnostic message.
+  mimetype.parse("text/html; first=\u{0001}; second=\u{0002}")
+  |> should.equal(
+    Error(mimetype.InvalidParameterValue(parameter: "first", byte: 1)),
+  )
+}
+
 pub fn parse_accepts_valid_token_essence_test() {
   // Tokens with all the printable-ASCII tchar specials must still pass.
   let assert Ok(mt) = mimetype.parse("application/vnd.api+json")

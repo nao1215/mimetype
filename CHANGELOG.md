@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+### Added
+
+- Property-based and metamorphic tests using
+  [metamon](https://github.com/nao1215/metamon) covering the public
+  surface of the top-level `mimetype` module. Lives in
+  `test/mimetype_metamon_test.gleam`. Highlights:
+  `parse |> to_string` round-trips up to case (essence is normalised
+  to lowercase per RFC 6838); `parse("")` and whitespace-only inputs
+  are rejected with `EmptyMimeType`; alpha-only inputs without a
+  slash are rejected; `is_image` / `is_text` agree with the
+  `image/` / `text/` essence prefixes; `is_a` is reflexive on
+  parsed types; extension lookup is case-insensitive and strips a
+  leading `.`; `extension_to_mime_type_strict` round-trips through
+  `mime_type_to_extensions_strict` for canonical extensions;
+  unknown extensions return `application/octet-stream`;
+  `detect(<<>>)` returns the octet-stream sentinel and
+  `detect_strict(<<>>)` returns `Error(EmptyInput)`; PNG / JPEG /
+  PDF / ZIP magic-byte signatures detect correctly; `detect` is
+  stable when arbitrary trailing bytes are appended to a known
+  signature (a `forall` over `bit_array`).
+
 ## [0.16.0] - 2026-05-07
 
 ### Documentation

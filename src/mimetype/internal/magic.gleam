@@ -216,6 +216,7 @@ const signatures = [
   Bytes("audio/mp4", [#(4, <<"ftyp":utf8>>), #(8, <<"M4P ":utf8>>)]),
   Bytes("video/quicktime", [#(4, <<"ftyp":utf8>>), #(8, <<"qt  ":utf8>>)]),
   Check("video/mp4", looks_like_iso_bmff_video),
+  Check("application/rtf", looks_like_rtf),
   Check("application/json", looks_like_json),
   Check("text/html", looks_like_html),
   Check("image/svg+xml", looks_like_svg),
@@ -355,6 +356,24 @@ type JsonResult {
   Valid(BitArray, Int)
   Truncated
   Invalid
+}
+
+/// Match RTF documents by their literal `{\rtf<digit>` header.
+///
+/// The Rich Text Format spec requires every RTF document to begin
+/// with `{\rtfN` where `N` is an ASCII digit identifying the RTF
+/// version (`1` is the only widely-deployed value, but the spec
+/// allows any digit). The 6-byte sniff has no false-positive risk
+/// against any other widely-deployed format. Without this rule the
+/// `{\rtf...` prefix slid through to `looks_like_plain_text` because
+/// every byte in the header is printable ASCII, leaving real RTF
+/// uploads silently misdetected as `text/plain`. (#106 / #107)
+fn looks_like_rtf(bytes: BitArray) -> Bool {
+  case bytes {
+    <<0x7B, 0x5C, 0x72, 0x74, 0x66, version, _:bits>> ->
+      version >= 0x30 && version <= 0x39
+    _ -> False
+  }
 }
 
 fn looks_like_json(bytes: BitArray) -> Bool {

@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **detect**: RTF documents (`{\rtf1...`) were misdetected as
+  `text/plain` because every byte in the header is printable ASCII
+  and the magic-byte detector had no rule for them, so the input
+  slid through to the `looks_like_plain_text` heuristic. Add a
+  6-byte signature check (`{\rtf` + ASCII digit) that resolves to
+  `application/rtf`. Closes the security gap where a Word-import
+  endpoint with an `application/rtf`-only allowlist would silently
+  reject valid RTF uploads, and the inverse case where a
+  `text/plain`-permissive endpoint would accept an RTF file with
+  embedded objects/macros. (#106, #107)
+
 ### Added
 
 - Property-based and metamorphic tests using

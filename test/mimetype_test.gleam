@@ -619,6 +619,44 @@ pub fn detect_pdf_test() {
   should_detect(<<"%PDF-1.7":utf8>>, "application/pdf")
 }
 
+pub fn detect_rtf_minimal_test() {
+  // `{\rtf1` is the minimal valid RTF header — every RTF document
+  // begins with `{\rtfN` where `N` is an ASCII digit.
+  should_detect(<<"{\\rtf1":utf8>>, "application/rtf")
+}
+
+pub fn detect_rtf_with_charset_test() {
+  // Realistic RTF preamble with the `\ansi` charset declaration that
+  // follows the version digit.
+  should_detect(<<"{\\rtf1\\ansi\\deff0":utf8>>, "application/rtf")
+}
+
+pub fn detect_rtf_version_zero_test() {
+  // Spec allows any digit after `\rtf`; verify version `0` works
+  // even though `1` is the only widely-deployed value.
+  should_detect(<<"{\\rtf0":utf8>>, "application/rtf")
+}
+
+pub fn detect_rtf_version_nine_test() {
+  should_detect(<<"{\\rtf9":utf8>>, "application/rtf")
+}
+
+pub fn detect_rtf_must_have_digit_test() {
+  // Not RTF — header is missing the version digit. Falls through to
+  // the plain-text heuristic.
+  mimetype.detect(<<"{\\rtfX":utf8>>)
+  |> mimetype.essence_of
+  |> should.not_equal("application/rtf")
+}
+
+pub fn detect_rtf_partial_prefix_is_not_rtf_test() {
+  // Five bytes is one short of the version digit; the rule requires
+  // at least 6 bytes so we don't accept truncated headers.
+  mimetype.detect(<<"{\\rtf":utf8>>)
+  |> mimetype.essence_of
+  |> should.not_equal("application/rtf")
+}
+
 pub fn detect_zip_test() {
   should_detect(<<0x50, 0x4B, 0x03, 0x04, 20, 0, 0, 0>>, "application/zip")
 }

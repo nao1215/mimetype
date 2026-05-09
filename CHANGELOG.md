@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-05-09
+
 ### Fixed
 
 - **detect**: RTF documents (`{\rtf1...`) were misdetected as

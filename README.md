@@ -296,6 +296,7 @@ re-run `just generate-readme` after adding or removing a signature.
 - `application/msword`
 - `application/ogg`
 - `application/pdf`
+- `application/rtf`
 - `application/vnd.android.package-archive`
 - `application/vnd.apache.parquet`
 - `application/vnd.ms-asf`

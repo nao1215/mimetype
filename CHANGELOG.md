@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-05-11
+
 ### Added
 
 - **Extension override layer**: a new `scripts/extension_overrides.json`

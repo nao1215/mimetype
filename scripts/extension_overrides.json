@@ -1,0 +1,11 @@
+{
+  "_comment": "Extension-to-MIME overrides merged on top of jshttp/mime-db. Each entry must mirror upstream's shape: { source: string, extensions: string[] }. The merge happens in scripts/generate_mime_db.sh and is regenerated into the FFI tables, so changes here MUST be followed by `just generate-db`. Entries here exist because upstream's mime-db carries the MIME type but leaves the `extensions` array empty (typical for IANA-registered formats whose canonical extension is documented elsewhere) or because the MIME type itself is community-standard rather than IANA-registered.",
+  "application/jsonl": {
+    "source": "custom",
+    "extensions": ["jsonl"]
+  },
+  "application/x-ndjson": {
+    "source": "custom",
+    "extensions": ["ndjson"]
+  }
+}

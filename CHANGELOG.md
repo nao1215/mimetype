@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Extension override layer**: a new `scripts/extension_overrides.json`
+  file is merged into the upstream jshttp/mime-db output by
+  `scripts/generate_mime_db.sh`. The merge is right-biased — entries
+  in the overrides file take precedence over upstream entries with
+  the same MIME-type key. This is the sustainable mechanism for
+  adding extension mappings that upstream lacks (typical for IANA
+  MIMEs whose canonical extension is documented elsewhere, and for
+  community-standard MIMEs not in the IANA registry). Future
+  extension gaps can be closed by adding a one-line override entry
+  and running `just generate-db`. (#112)
+- **`extension_to_mime_type("jsonl")`** now returns
+  `application/jsonl` (community-standard for JSON Lines, used by
+  Vector, Loki, jq, and most ML-dataset tooling). Closes #111.
+- **`extension_to_mime_type("ndjson")`** now returns
+  `application/x-ndjson` (de-facto MIME for newline-delimited JSON).
+  (#112)
+
 ## [0.17.0] - 2026-05-09
 
 ### Fixed

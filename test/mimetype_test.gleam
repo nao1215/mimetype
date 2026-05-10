@@ -95,6 +95,20 @@ pub fn extension_to_mime_type_falls_back_for_unknown_test() {
   |> should_be_mime("application/octet-stream")
 }
 
+// Override-layer mappings (scripts/extension_overrides.json). These
+// MIME types live in upstream jshttp/mime-db without an `extensions`
+// field (or are community-standard MIMEs not in the IANA registry),
+// so the override layer adds the canonical extension mappings.
+pub fn extension_to_mime_type_jsonl_override_test() {
+  mimetype.extension_to_mime_type("jsonl")
+  |> should_be_mime("application/jsonl")
+}
+
+pub fn extension_to_mime_type_ndjson_override_test() {
+  mimetype.extension_to_mime_type("ndjson")
+  |> should_be_mime("application/x-ndjson")
+}
+
 pub fn extension_to_mime_type_strict_returns_ok_for_known_extension_test() {
   mimetype.extension_to_mime_type_strict(".JSON")
   |> should_be_ok_mime("application/json")

@@ -3,8 +3,9 @@ set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 DB_DIR="$ROOT/doc/reference/upstream/mime-db"
-DB_JSON="$DB_DIR/db.json"
+DB_JSON_UPSTREAM="$DB_DIR/db.json"
 DB_PACKAGE="$DB_DIR/package.json"
+OVERRIDES_JSON="$ROOT/scripts/extension_overrides.json"
 OUT_GLEAM="$ROOT/src/mimetype/internal/db.gleam"
 OUT_ERL="$ROOT/src/mimetype/internal/mimetype_db_ffi.erl"
 OUT_MJS="$ROOT/src/mimetype/internal/db_ffi.mjs"
@@ -15,9 +16,9 @@ mimetype_require_tool jq
 mimetype_require_tool git
 mimetype_require_tool gleam
 
-if [ ! -f "$DB_JSON" ]; then
+if [ ! -f "$DB_JSON_UPSTREAM" ]; then
   cat >&2 <<EOF
-error: $DB_JSON was not found.
+error: $DB_JSON_UPSTREAM was not found.
 
 Clone the upstream references first, for example:
 
@@ -31,6 +32,11 @@ if [ ! -f "$DB_PACKAGE" ]; then
   exit 1
 fi
 
+if [ ! -f "$OVERRIDES_JSON" ]; then
+  echo "error: $OVERRIDES_JSON was not found." >&2
+  exit 1
+fi
+
 version="$(jq -er '.version | strings | select(length > 0)' "$DB_PACKAGE")"
 commit="$(git -C "$DB_DIR" rev-parse --short HEAD)"
 
@@ -40,6 +46,19 @@ tmp_erl="$tmp_dir/mimetype_db_ffi.erl"
 tmp_mjs="$tmp_dir/db_ffi.mjs"
 validate_dir="$tmp_dir/project"
 trap 'rm -rf "$tmp_dir"' EXIT
+
+# Merge upstream mime-db with our extension overrides. Overrides take
+# precedence: if a key (MIME type) appears in both, the override wins
+# in full (no per-field merge), so an override entry must include
+# every field needed downstream (`source`, `extensions`, ...).
+# The "_comment" key is dropped from the overrides before merging
+# because it isn't a MIME type.
+DB_JSON="$tmp_dir/db_merged.json"
+jq -s '
+  .[0] as $upstream
+  | (.[1] | del(._comment)) as $overrides
+  | $upstream + $overrides
+' "$DB_JSON_UPSTREAM" "$OVERRIDES_JSON" > "$DB_JSON"
 
 cat > "$tmp_gleam" <<EOF
 // This file contains data derived from jshttp/mime-db.

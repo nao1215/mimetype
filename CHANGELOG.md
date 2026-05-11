@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-05-11
+
 ### Added
 
 - `mimetype/accept` — RFC 9110 §12.5 content negotiation

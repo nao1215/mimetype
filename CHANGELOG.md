@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- `mimetype/accept` — RFC 9110 §12.5 content negotiation
+  parser and selector. Handles `Accept`, `Accept-Encoding`,
+  `Accept-Charset`, and `Accept-Language` headers (q-values,
+  wildcards `*/*` and `type/*`, accept-ext parameters,
+  whitespace tolerance per §5.6.3), and implements the §12.5.1
+  proactive-negotiation algorithm via `negotiate/2`. (#116)
+
 ## [0.18.0] - 2026-05-11
 
 ### Added

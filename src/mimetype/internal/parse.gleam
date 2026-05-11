@@ -107,7 +107,7 @@ pub fn is_token(s: String) -> Bool {
 /// surrounding value. Backslash escapes (`\"`, `\\`, `\;` etc.) within
 /// a quoted-string are honoured so the next character does not toggle
 /// the quote state.
-fn split_on_unquoted_semicolons(s: String) -> List(String) {
+pub fn split_on_unquoted_semicolons(s: String) -> List(String) {
   do_split_semis(s, "", [], False, False)
   |> list.reverse
 }

@@ -151,6 +151,45 @@ stops is more useful than discovering it from a surprising result:
 - It does sniff `text/plain` from printable-ASCII-only payloads (the bounded WHATWG-style binary-vs-text heuristic added in #20) and recognises the UTF-8/16/32 BOM signatures, returning `text/plain; charset=<utf-X>` for the BOM cases. This is the **only** text-related sniffing — it does not detect text encodings beyond the BOM marker, and the printable-ASCII fallback emits a bare `text/plain` with no charset parameter.
 - Beyond the four BOM-derived `text/plain; charset=utf-*` signatures it does not parse, validate, or surface MIME-parameter values from the wire.
 
+## Content negotiation
+
+`mimetype/accept` parses RFC 9110 §12.5 `Accept`-family headers and
+picks the best server offer for a given client header.
+
+```gleam
+import mimetype
+import mimetype/accept
+
+pub fn main() {
+  let assert Ok(items) = accept.parse("text/html, application/json;q=0.9")
+  let assert Ok(html) = mimetype.parse("text/html")
+  let assert Ok(json) = mimetype.parse("application/json")
+  accept.negotiate(client_accepts: items, server_offers: [json, html])
+  // -> Some(html)
+}
+```
+
+The same module handles `Accept-Encoding`, `Accept-Charset`, and
+`Accept-Language`:
+
+```gleam
+import mimetype/accept
+
+pub fn main() {
+  let assert Ok(items) =
+    accept.parse_encoding("gzip, br;q=1.0, *;q=0.1")
+  accept.negotiate_value(client_accepts: items, server_offers: ["br", "gzip"])
+  // -> Some("br")
+}
+```
+
+Notes:
+- `q=0` excludes a media range from consideration.
+- A bare `*/*` client header returns the server's first offer
+  (server preference).
+- `Specific(MimeType)` matching is essence-only — RFC §12.5.1
+  parameter-level "more-specific" matching is currently out of scope.
+
 ## Reader-based detection
 
 `detect_reader` and `detect_reader_strict` let callers detect a MIME

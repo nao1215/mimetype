@@ -483,6 +483,53 @@ pub fn parse_error_reports_first_offending_parameter_test() {
   )
 }
 
+// Issue #119: parameter names must be valid RFC 9110 §5.6.6 / RFC
+// 7230 §3.2.6 tokens. Whitespace (SP, HTAB) and other non-tchar
+// codepoints are not allowed; previously the parser accepted them
+// and round-tripped the malformed name through `to_string`, which
+// would emit a Content-Type header that RFC-strict receivers drop
+// the parameter from.
+
+pub fn parse_rejects_space_in_parameter_name_test() {
+  mimetype.parse("application/json; chars et=utf-8")
+  |> should.equal(Error(mimetype.InvalidParameterName(name: "chars et")))
+}
+
+pub fn parse_rejects_htab_in_parameter_name_test() {
+  mimetype.parse("application/json; cha\u{0009}rset=utf-8")
+  |> should.equal(Error(mimetype.InvalidParameterName(name: "cha\u{0009}rset")))
+}
+
+pub fn parse_rejects_multiple_spaces_in_parameter_name_test() {
+  mimetype.parse("application/json; ch a r set=utf-8")
+  |> should.equal(Error(mimetype.InvalidParameterName(name: "ch a r set")))
+}
+
+pub fn parse_rejects_non_token_punctuation_in_parameter_name_test() {
+  // Parentheses are HTTP separators and must be rejected as part of a
+  // parameter name even though they appear elsewhere in MIME wire
+  // formats.
+  mimetype.parse("application/json; (charset)=utf-8")
+  |> should.equal(Error(mimetype.InvalidParameterName(name: "(charset)")))
+}
+
+pub fn parse_accepts_token_specials_in_parameter_name_test() {
+  // Every tchar specials character is a valid token codepoint per
+  // RFC 7230 §3.2.6 and must round-trip through parse / to_string.
+  let assert Ok(mt) =
+    mimetype.parse("application/json; weird!#$%&'*+-.^_`|~=utf-8")
+  mt
+  |> mimetype.parameter_of("weird!#$%&'*+-.^_`|~")
+  |> should.equal(Some("utf-8"))
+}
+
+pub fn parse_first_invalid_parameter_name_short_circuits_test() {
+  // The first non-token parameter name in input order is reported;
+  // later parameters (even with their own problems) don't matter.
+  mimetype.parse("application/json; bad name=utf-8; charset=\u{0001}")
+  |> should.equal(Error(mimetype.InvalidParameterName(name: "bad name")))
+}
+
 pub fn parse_accepts_valid_token_essence_test() {
   // Tokens with all the printable-ASCII tchar specials must still pass.
   let assert Ok(mt) = mimetype.parse("application/vnd.api+json")

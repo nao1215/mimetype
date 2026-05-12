@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING**: `mimetype.parse` now rejects parameter names that are
+  not a valid RFC 9110 §5.6.6 / RFC 7230 §3.2.6 `token`. Inputs such
+  as `"application/json; chars et=utf-8"`,
+  `"application/json; cha\\trset=utf-8"`, or
+  `"application/json; ch a r set=utf-8"` previously parsed to
+  `Ok(_)` with the malformed name round-tripping through
+  `to_string`, which would emit a `Content-Type` header that
+  RFC-strict receivers drop the parameter from. They now return
+  `Error(InvalidParameterName(name))`, carrying the trimmed but
+  non-case-folded offending name. A new
+  `InvalidParameterName(name: String)` variant is added to
+  `ParseError`; existing exhaustive `case` clauses on `ParseError`
+  must add a branch (or rely on the new variant being unreachable
+  for the inputs they actually pass through). Same RFC-strict
+  posture as #88's `valid_essence` fix, now extended to the
+  parameter-name path. (#119)
+
 ## [0.19.0] - 2026-05-11
 
 ### Added

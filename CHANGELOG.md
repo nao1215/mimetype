@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-05-12
+
 ### Changed
 
 - **BREAKING**: `mimetype.parse` now rejects parameter names that are

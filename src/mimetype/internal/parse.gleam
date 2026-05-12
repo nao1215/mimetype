@@ -28,6 +28,11 @@ pub type ParseFailure {
   /// Input did not match the `type/subtype` essence shape; carries
   /// the original string for the caller's `InvalidMimeType` payload.
   InvalidEssence(original: String)
+  /// A parameter name was not a valid RFC 7230 §3.2.6 token — most
+  /// often because it contained whitespace (SP, HTAB) or another
+  /// non-tchar codepoint. Carries the offending name (trimmed but
+  /// not case-folded) so the facade can render an actionable error.
+  InvalidParameterName(name: String)
   /// A parameter value contained an ASCII control byte that is valid
   /// in neither `token` nor `quoted-string` per RFC 7231 §3.1.1.1.
   /// `byte` is the offending codepoint (0..31 except 9; or 127);
@@ -176,9 +181,21 @@ fn parse_parameter_segment(
   case string.split_once(seg, on: "=") {
     Error(Nil) -> Ok(acc)
     Ok(#(name, value)) -> {
-      let normalized_name = name |> string.trim |> string.lowercase
+      let trimmed_name = string.trim(name)
+      let normalized_name = string.lowercase(trimmed_name)
       let normalized_value = value |> string.trim |> unquote_value
       use <- bool.guard(when: normalized_name == "", return: Ok(acc))
+      // RFC 9110 §5.6.6 / RFC 7230 §3.2.6: parameter-name = token.
+      // Reject whitespace and other non-tchar codepoints in names so
+      // round-tripping through `serialise` cannot emit a malformed
+      // Content-Type header. The lenient acceptance of trailing `;`,
+      // `;;`, `key` (no `=`), and empty unquoted values is kept here
+      // because those segments are dropped before reaching this
+      // guard.
+      use <- bool.guard(
+        when: !is_token(normalized_name),
+        return: Error(InvalidParameterName(name: trimmed_name)),
+      )
       case forbidden_control_byte(normalized_value) {
         Some(byte) ->
           Error(InvalidParameterValue(parameter: normalized_name, byte: byte))

@@ -43,6 +43,16 @@ pub type ParseError {
   /// by RFC 6838. The original input is carried so the caller can
   /// render it without re-parsing.
   InvalidMimeType(String)
+  /// A parameter name was not a valid RFC 9110 §5.6.6 / RFC 7230
+  /// §3.2.6 `token`. Most commonly this means the name contained
+  /// whitespace (SP, HTAB) or another non-tchar codepoint —
+  /// `"chars et"`, `"cha\tarset"`, etc. Carries the trimmed but
+  /// non-case-folded name so callers can render an actionable error
+  /// like "parameter name 'chars et' contains whitespace".
+  /// Round-tripping such a name through `to_string` would otherwise
+  /// emit a malformed `Content-Type` header that RFC-strict HTTP
+  /// receivers drop the parameter from.
+  InvalidParameterName(name: String)
   /// A parameter value contained an ASCII control byte that is valid
   /// in neither `token` nor `quoted-string` per RFC 7231 §3.1.1.1.
   /// Carries the parameter name and the offending codepoint so the
@@ -124,6 +134,9 @@ pub const default_detection_limit = 3072
 /// - `Error(EmptyMimeType)` for empty / whitespace-only input.
 /// - `Error(InvalidMimeType(original))` when the essence does not
 ///   match the `type/subtype` shape required by RFC 6838.
+/// - `Error(InvalidParameterName(name))` when a parameter name is not
+///   a valid RFC 9110 §5.6.6 / RFC 7230 §3.2.6 `token` (most often
+///   because it contains whitespace or another non-tchar codepoint).
 /// - `Error(InvalidParameterValue(parameter, byte))` when a parameter
 ///   value contains an ASCII control byte that is valid in neither
 ///   `token` nor `quoted-string` per RFC 7231 §3.1.1.1 (0x00-0x1F
@@ -136,6 +149,8 @@ pub fn parse(input: String) -> Result(MimeType, ParseError) {
     Error(parse_internal.Empty) -> Error(EmptyMimeType)
     Error(parse_internal.InvalidEssence(original)) ->
       Error(InvalidMimeType(original))
+    Error(parse_internal.InvalidParameterName(name:)) ->
+      Error(InvalidParameterName(name: name))
     Error(parse_internal.InvalidParameterValue(parameter:, byte:)) ->
       Error(InvalidParameterValue(parameter: parameter, byte: byte))
   }
@@ -578,9 +593,11 @@ fn from_internal(s: String) -> MimeType {
     Error(parse_internal.InvalidEssence(_)) ->
       MimeType(essence: s |> string.trim |> string.lowercase, parameters: [])
     // Internal sources (the magic table, the extension DB) never
-    // include control bytes in parameter values; falling back to the
-    // bare essence here is the conservative path if the data tables
-    // ever drift.
+    // include non-token bytes in parameter names or values; falling
+    // back to the bare essence here is the conservative path if the
+    // data tables ever drift.
+    Error(parse_internal.InvalidParameterName(_)) ->
+      MimeType(essence: s |> string.trim |> string.lowercase, parameters: [])
     Error(parse_internal.InvalidParameterValue(_, _)) ->
       MimeType(essence: s |> string.trim |> string.lowercase, parameters: [])
   }

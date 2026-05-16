@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-05-16
+
 ### Added
 
 - `mimetype.SimpleDetectionError`: type alias for `DetectionError(Nil)`, recommended at every non-reader call site so caller signatures no longer have to spell out the structurally unreachable `Nil` parameter. All non-reader functions in the public surface (`charset_of`, `detect_strict`, `detect_strict_with_limit`, the `extension_to_mime_type_strict` / `filename_to_mime_type_strict` families, and the combined `detect_*_strict` helpers) now declare their return type with the alias — the underlying type is unchanged, so existing callers that wrote `DetectionError(Nil)` keep compiling without modification. Reader callers continue to use `DetectionError(read_error)` directly. (#122)

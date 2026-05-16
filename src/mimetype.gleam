@@ -72,7 +72,9 @@ pub type ParseError {
 /// pipelines that want to render each case differently. `read_error`
 /// is the type the supplied `Reader` produces; it flows through
 /// unchanged when the reader fails. Strict functions that do not take
-/// a reader use `DetectionError(Nil)`.
+/// a reader use `DetectionError(Nil)`; the `SimpleDetectionError`
+/// alias below is the recommended name for that shape at non-reader
+/// call sites.
 pub type DetectionError(read_error) {
   /// No signature matched the bytes that were inspected, and no
   /// filename / extension hint resolved.
@@ -90,6 +92,16 @@ pub type DetectionError(read_error) {
   /// The reader returned an error before any bytes could be inspected.
   ReaderError(read_error)
 }
+
+/// Convenience alias for the non-reader detection error shape:
+/// `SimpleDetectionError = DetectionError(Nil)`. Use this name when
+/// `detect_strict` and the other non-reader functions appear in
+/// caller signatures — the `Nil` slot is structurally unreachable
+/// for code that does not use the `Reader` family, so naming it
+/// explicitly at every call site is noise. Reader callers continue
+/// to use `DetectionError(read_error)` directly.
+pub type SimpleDetectionError =
+  DetectionError(Nil)
 
 /// A callback that reads up to the requested number of bytes from an
 /// input source. Returns `Ok(bits)` with the bytes actually read, or
@@ -316,7 +328,7 @@ pub fn ancestors(mime: MimeType) -> List(MimeType) {
 /// because the caller typically pairs it with a separately determined
 /// media type via `parameter_of` / `charset_of_type` rather than as a
 /// standalone MIME value.
-pub fn charset_of(bytes: BitArray) -> Result(String, DetectionError(Nil)) {
+pub fn charset_of(bytes: BitArray) -> Result(String, SimpleDetectionError) {
   detect_internal.charset_of(bytes) |> result.map_error(detect_failure_to_error)
 }
 
@@ -343,7 +355,7 @@ pub fn extension_to_mime_type(extension: String) -> MimeType {
 /// the caller can render it without re-parsing.
 pub fn extension_to_mime_type_strict(
   extension: String,
-) -> Result(MimeType, DetectionError(Nil)) {
+) -> Result(MimeType, SimpleDetectionError) {
   let normalized = lookup_internal.normalize_extension(extension)
   use <- bool.guard(when: normalized == "", return: Error(EmptyInput))
   case lookup_internal.essence_for_extension(normalized) {
@@ -393,7 +405,7 @@ pub fn filename_to_mime_type(path: String) -> MimeType {
 /// the normalised extension is not in the database.
 pub fn filename_to_mime_type_strict(
   path: String,
-) -> Result(MimeType, DetectionError(Nil)) {
+) -> Result(MimeType, SimpleDetectionError) {
   case lookup_internal.extension_from_filename(path) {
     Some(extension) -> extension_to_mime_type_strict(extension)
     None -> Error(EmptyInput)
@@ -424,7 +436,7 @@ pub fn detect(bytes: BitArray) -> MimeType {
 /// non-empty input. Prefer this variant when the
 /// `application/octet-stream` fallback would be ambiguous; use
 /// `detect/1` when an unconditional `MimeType` is more convenient.
-pub fn detect_strict(bytes: BitArray) -> Result(MimeType, DetectionError(Nil)) {
+pub fn detect_strict(bytes: BitArray) -> Result(MimeType, SimpleDetectionError) {
   detect_with_limit_strict(bytes, default_detection_limit)
 }
 
@@ -446,7 +458,7 @@ pub fn detect_with_limit(bytes: BitArray, limit: Int) -> MimeType {
 pub fn detect_with_limit_strict(
   bytes: BitArray,
   limit: Int,
-) -> Result(MimeType, DetectionError(Nil)) {
+) -> Result(MimeType, SimpleDetectionError) {
   detect_internal.detect_essence_with_limit(bytes, limit)
   |> result.map(from_internal)
   |> result.map_error(detect_failure_to_error)
@@ -466,7 +478,7 @@ pub fn detect_with_limit_strict(
 /// extension.
 pub fn detect_signature_only(
   bytes: BitArray,
-) -> Result(MimeType, DetectionError(Nil)) {
+) -> Result(MimeType, SimpleDetectionError) {
   detect_signature_only_with_limit(bytes, default_detection_limit)
 }
 
@@ -474,7 +486,7 @@ pub fn detect_signature_only(
 pub fn detect_signature_only_with_limit(
   bytes: BitArray,
   limit: Int,
-) -> Result(MimeType, DetectionError(Nil)) {
+) -> Result(MimeType, SimpleDetectionError) {
   detect_internal.detect_signature_only_with_limit(bytes, limit)
   |> result.map(from_internal)
   |> result.map_error(detect_failure_to_error)
@@ -535,7 +547,7 @@ pub fn detect_with_extension(bytes: BitArray, extension: String) -> MimeType {
 pub fn detect_with_extension_strict(
   bytes: BitArray,
   extension: String,
-) -> Result(MimeType, DetectionError(Nil)) {
+) -> Result(MimeType, SimpleDetectionError) {
   detect_signature_only(bytes)
   |> result.lazy_or(fn() { extension_to_mime_type_strict(extension) })
   |> result.lazy_or(fn() { detect_strict(bytes) })
@@ -568,7 +580,7 @@ pub fn detect_with_filename(bytes: BitArray, filename: String) -> MimeType {
 pub fn detect_with_filename_strict(
   bytes: BitArray,
   filename: String,
-) -> Result(MimeType, DetectionError(Nil)) {
+) -> Result(MimeType, SimpleDetectionError) {
   detect_signature_only(bytes)
   |> result.lazy_or(fn() { filename_to_mime_type_strict(filename) })
   |> result.lazy_or(fn() { detect_strict(bytes) })

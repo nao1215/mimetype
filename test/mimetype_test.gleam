@@ -157,6 +157,32 @@ pub fn mime_type_to_extensions_unknown_type_returns_empty_list_test() {
   |> should.equal([])
 }
 
+// #131: `audio/mp3` is community-standard; the IANA name for the same
+// payload is `audio/mpeg`. Both spellings must return the full
+// extension set so caller choice of MIME spelling does not silently
+// reduce the lookup.
+
+pub fn mime_type_to_extensions_mp3_alias_matches_mpeg_test() {
+  let mp3 = mimetype.mime_type_to_extensions(mt("audio/mp3"))
+  let mpeg = mimetype.mime_type_to_extensions(mt("audio/mpeg"))
+  mp3 |> should.equal(mpeg)
+}
+
+pub fn mime_type_to_extensions_mp3_includes_canonical_set_test() {
+  let exts = mimetype.mime_type_to_extensions(mt("audio/mp3"))
+  list.contains(exts, "mp3") |> should.be_true
+  list.contains(exts, "mpga") |> should.be_true
+  list.contains(exts, "mp2") |> should.be_true
+}
+
+pub fn mime_type_to_extensions_strict_mp3_alias_test() {
+  let assert Ok(mp3_exts) =
+    mimetype.mime_type_to_extensions_strict(mt("audio/mp3"))
+  let assert Ok(mpeg_exts) =
+    mimetype.mime_type_to_extensions_strict(mt("audio/mpeg"))
+  mp3_exts |> should.equal(mpeg_exts)
+}
+
 pub fn mime_type_to_extensions_trims_whitespace_test() {
   mimetype.mime_type_to_extensions(mt("  image/jpeg  "))
   |> should.equal(["jpg", "jpeg", "jpe"])

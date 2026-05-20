@@ -236,6 +236,29 @@ pub fn charset_of_type_returns_none_when_missing_test() {
   |> should.equal(None)
 }
 
+// #126: an empty parameter value (`charset=` with no token after `=`) is
+// not a valid `parameter-value` per the RFC grammar — both `token` and
+// `quoted-string` require at least one octet. Collapse it to `None` so
+// the `Option(String)` contract ("present means meaningful") holds.
+
+pub fn parameter_of_returns_none_for_empty_value_test() {
+  mt("text/plain; charset=")
+  |> mimetype.parameter_of("charset")
+  |> should.equal(None)
+}
+
+pub fn charset_of_type_returns_none_for_empty_value_test() {
+  mt("text/plain; charset=")
+  |> mimetype.charset_of_type
+  |> should.equal(None)
+}
+
+pub fn parameter_of_returns_none_for_empty_quoted_value_test() {
+  mt("text/plain; charset=\"\"")
+  |> mimetype.parameter_of("charset")
+  |> should.equal(None)
+}
+
 // RFC 7230 §3.2.6: parameter values may be expressed as quoted-string
 // (DQUOTE qdtext DQUOTE). The surrounding `"` are syntax, not part of
 // the value, so the parser must strip them.
@@ -327,13 +350,16 @@ pub fn to_string_escapes_inner_backslash_test() {
 }
 
 pub fn to_string_quotes_empty_parameter_value_test() {
-  // Empty value is not a valid token (`1*tchar`), so it must be
-  // serialised as the empty quoted-string `""`.
+  // Empty value is not a valid token (`1*tchar`), so on serialisation
+  // the parameter is emitted as the empty quoted-string `""`. The
+  // round-trip survives, but `parameter_of` collapses the empty value
+  // to `None` per #126 (an empty `parameter-value` is not legal in the
+  // RFC grammar; `Some(_)` is reserved for meaningful content).
   let assert Ok(mt1) = mimetype.parse("application/json; tag=\"\"")
   let serialised = mimetype.to_string(mt1)
   let assert Ok(mt2) = mimetype.parse(serialised)
   mimetype.parameter_of(mt2, "tag")
-  |> should.equal(Some(""))
+  |> should.equal(None)
 }
 
 pub fn to_string_leaves_token_value_unquoted_test() {

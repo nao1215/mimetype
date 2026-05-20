@@ -213,13 +213,19 @@ pub fn essence_of(mt: MimeType) -> String {
 ///   Whitespace *inside* a quoted-string is part of the value and is
 ///   preserved verbatim (`text/plain; description="hello world"` →
 ///   `Some("hello world")`).
+/// - **Empty values**: an empty parameter value (e.g.
+///   `text/plain; charset=`) is collapsed to `None`. RFC 9110 / RFC 7230
+///   define `parameter-value` as `token / quoted-string`, both of which
+///   require at least one octet, so `Some("")` would imply a value that
+///   the grammar does not actually permit. Callers reading `Some(_)` can
+///   then assume the wrapped string carries information.
 pub fn parameter_of(mt: MimeType, key: String) -> Option(String) {
   let requested = key |> string.trim |> string.lowercase
   use <- bool.lazy_guard(when: requested == "", return: fn() { None })
   mt.parameters
   |> list.find_map(fn(p) {
     let #(name, value) = p
-    case name == requested {
+    case name == requested && value != "" {
       True -> Ok(value)
       False -> Error(Nil)
     }

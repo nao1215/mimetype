@@ -5,6 +5,7 @@
 ### Changed
 
 - `mimetype.parameter_of` and `mimetype.charset_of_type` now return `None` when the stored parameter value is the empty string (e.g. `text/plain; charset=`). RFC 9110 / RFC 7230 define `parameter-value` as `token / quoted-string`, both of which require at least one octet — `Some("")` would imply a value the grammar does not permit and breaks the implicit "`Some(_)` means meaningful content" contract that callers assume. `mimetype.parse` itself remains lenient: the empty-valued parameter is still stored and survives a `to_string` round-trip as the empty quoted-string `""`. (#126)
+- `mimetype.is_a`, `mimetype.is_xml_based`, and `mimetype.ancestors` now recognise the RFC 6839 §3.1 structured-syntax suffix hierarchy. A type whose essence ends with `+xml` (e.g. `application/xhtml+xml`, `application/atom+xml`, `application/rss+xml`, `application/soap+xml`) is treated as a child of `application/xml`; `+json` types as children of `application/json`; `+zip` as `application/zip`; `+cbor` as `application/cbor`. The static hierarchy table still wins on collisions, so `image/svg+xml` continues to point at `text/xml`. Previously only types that had an explicit entry in the table (essentially just `image/svg+xml`) were recognised as XML-based, so every other `*+xml` type returned `False` from `is_xml_based` and `is_a(_, application/xml)`. (#128, #130)
 
 ## [0.21.0] - 2026-05-16
 

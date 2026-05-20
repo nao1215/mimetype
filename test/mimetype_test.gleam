@@ -2145,6 +2145,85 @@ pub fn is_xml_based_html_test() {
   |> should.equal(False)
 }
 
+// #128 / #130: every `*+xml` type is XML-based per RFC 6839 §3.1.
+
+pub fn is_xml_based_xhtml_plus_xml_test() {
+  mimetype.is_xml_based(mt("application/xhtml+xml"))
+  |> should.equal(True)
+}
+
+pub fn is_xml_based_atom_plus_xml_test() {
+  mimetype.is_xml_based(mt("application/atom+xml"))
+  |> should.equal(True)
+}
+
+pub fn is_xml_based_rss_plus_xml_test() {
+  mimetype.is_xml_based(mt("application/rss+xml"))
+  |> should.equal(True)
+}
+
+pub fn is_xml_based_soap_plus_xml_test() {
+  mimetype.is_xml_based(mt("application/soap+xml"))
+  |> should.equal(True)
+}
+
+pub fn is_xml_based_arbitrary_plus_xml_test() {
+  // Any unknown `*+xml` registration is still XML-based per the
+  // suffix grammar, not just the well-known ones.
+  mimetype.is_xml_based(mt("application/foo+xml"))
+  |> should.equal(True)
+}
+
+pub fn is_a_xhtml_is_application_xml_test() {
+  mimetype.is_a(mt("application/xhtml+xml"), mt("application/xml"))
+  |> should.equal(True)
+}
+
+pub fn is_a_atom_is_application_xml_test() {
+  mimetype.is_a(mt("application/atom+xml"), mt("application/xml"))
+  |> should.equal(True)
+}
+
+pub fn is_a_ld_json_is_application_json_test() {
+  mimetype.is_a(mt("application/ld+json"), mt("application/json"))
+  |> should.equal(True)
+}
+
+pub fn is_a_hal_json_is_application_json_test() {
+  mimetype.is_a(mt("application/hal+json"), mt("application/json"))
+  |> should.equal(True)
+}
+
+pub fn is_a_unknown_plus_zip_is_application_zip_test() {
+  // `+zip` is one of the four RFC 6839 suffixes — an unregistered
+  // `application/x-custom+zip` is still a ZIP container.
+  mimetype.is_a(mt("application/x-custom+zip"), mt("application/zip"))
+  |> should.equal(True)
+}
+
+pub fn is_a_unknown_plus_cbor_is_application_cbor_test() {
+  mimetype.is_a(mt("application/x-custom+cbor"), mt("application/cbor"))
+  |> should.equal(True)
+}
+
+pub fn is_a_suffix_does_not_cross_to_other_parent_test() {
+  // `+json` does not imply `application/xml`, etc.
+  mimetype.is_a(mt("application/ld+json"), mt("application/xml"))
+  |> should.equal(False)
+}
+
+pub fn ancestors_xhtml_plus_xml_test() {
+  mimetype.ancestors(mt("application/xhtml+xml"))
+  |> list.map(mimetype.to_string)
+  |> should.equal(["application/xml"])
+}
+
+pub fn ancestors_ld_plus_json_test() {
+  mimetype.ancestors(mt("application/ld+json"))
+  |> list.map(mimetype.to_string)
+  |> should.equal(["application/json"])
+}
+
 pub fn ancestors_epub_test() {
   mimetype.ancestors(mt("application/epub+zip"))
   |> list.map(mimetype.to_string)

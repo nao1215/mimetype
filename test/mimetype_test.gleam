@@ -1351,6 +1351,57 @@ pub fn detect_with_extension_strict_prefers_extension_over_printable_ascii_csv_t
   |> should_be_ok_mime("text/csv")
 }
 
+// #127: a binary-claiming extension must not override a text-shaped
+// byte payload. The extension would be attacker-controlled in an
+// upload pipeline; trusting it to call a text payload `image/png`
+// lets the upstream (image renderer, validator) process attacker
+// text as if it were an image.
+
+pub fn detect_with_extension_text_bytes_with_png_ext_returns_text_test() {
+  let txt = <<"hello world this is plain text":utf8>>
+  mimetype.detect_with_extension(txt, "png")
+  |> should_be_mime("text/plain")
+}
+
+pub fn detect_with_extension_text_bytes_with_zip_ext_returns_text_test() {
+  let txt = <<"another plain text payload":utf8>>
+  mimetype.detect_with_extension(txt, "zip")
+  |> should_be_mime("text/plain")
+}
+
+pub fn detect_with_extension_text_bytes_with_jpg_ext_returns_text_test() {
+  mimetype.detect_with_extension(<<"hello":utf8>>, "jpg")
+  |> should_be_mime("text/plain")
+}
+
+pub fn detect_with_extension_json_bytes_with_png_ext_returns_json_test() {
+  // JSON is detected by structural sniff in `detect_signature_only`,
+  // so the extension is never consulted — JSON wins regardless.
+  let json = <<"{\"key\": \"value\"}":utf8>>
+  mimetype.detect_with_extension(json, "png")
+  |> should_be_mime("application/json")
+}
+
+pub fn detect_with_extension_xml_bytes_with_zip_ext_returns_xml_test() {
+  let xml = <<"<?xml version=\"1.0\"?>":utf8>>
+  mimetype.detect_with_extension(xml, "zip")
+  |> should_be_mime("text/xml")
+}
+
+pub fn detect_with_extension_text_bytes_with_csv_ext_still_returns_csv_test() {
+  // The fix must not regress the text-compatible extension case. A
+  // .csv extension is a stronger signal than the printable-ASCII
+  // heuristic's "text/plain", so it still wins.
+  mimetype.detect_with_extension(<<"plain text payload":utf8>>, "csv")
+  |> should_be_mime("text/csv")
+}
+
+pub fn detect_with_filename_text_bytes_with_png_filename_returns_text_test() {
+  // Same rule applies to detect_with_filename.
+  mimetype.detect_with_filename(<<"hello plain text":utf8>>, "evil.png")
+  |> should_be_mime("text/plain")
+}
+
 pub fn detect_with_extension_falls_back_to_text_plain_when_extension_unknown_test() {
   mimetype.detect_with_extension(<<"plain text\n":utf8>>, "totally-unknown-ext")
   |> should_be_mime("text/plain")

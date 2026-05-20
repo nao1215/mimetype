@@ -539,13 +539,16 @@ pub fn detect_reader_strict(
 ///
 /// Genuine binary signatures (PNG, JPEG, ZIP, BOM-tagged text, ...)
 /// and structural sniffs (JSON, HTML, XML, SVG) win over the
-/// extension hint. The extension takes priority when the only thing
-/// the byte side could say was the printable-ASCII fallback
-/// `text/plain` — a `.csv` extension is a stronger signal for
-/// plain-ASCII payloads than the byte-level fact "this looks
-/// textish". The printable-ASCII fallback is still used as a last
-/// resort when neither the byte signature nor the extension is
-/// recognisable.
+/// extension hint. After signatures, the extension hint and the
+/// byte-level printable-ASCII heuristic are reconciled: if the
+/// extension claims a text-treatable type (`is_text/1` returns
+/// `True`) it wins for specificity (`text/csv` beats `text/plain`),
+/// otherwise the byte heuristic wins. The latter rule (#127) prevents
+/// a text payload from being reported as `image/png` just because the
+/// caller passed a `.png` extension — a common shape in upload
+/// pipelines where the extension is attacker-controlled. The
+/// printable-ASCII fallback is still used as a last resort when
+/// neither the byte signature nor the extension is recognisable.
 pub fn detect_with_extension(bytes: BitArray, extension: String) -> MimeType {
   detect_with_extension_strict(bytes, extension)
   |> result.unwrap(default_mime_type)
@@ -564,8 +567,12 @@ pub fn detect_with_extension_strict(
   extension: String,
 ) -> Result(MimeType, SimpleDetectionError) {
   detect_signature_only(bytes)
-  |> result.lazy_or(fn() { extension_to_mime_type_strict(extension) })
-  |> result.lazy_or(fn() { detect_strict(bytes) })
+  |> result.lazy_or(fn() {
+    reconcile_extension_and_text(
+      extension_to_mime_type_strict(extension),
+      detect_strict(bytes),
+    )
+  })
 }
 
 /// Detect a `MimeType` from bytes, consulting the filename extension
@@ -573,10 +580,11 @@ pub fn detect_with_extension_strict(
 ///
 /// Genuine binary signatures (PNG, JPEG, ZIP, BOM-tagged text, ...)
 /// and structural sniffs (JSON, HTML, XML, SVG) win over the
-/// filename. The filename takes priority when the only thing the
-/// byte side could say was the printable-ASCII fallback `text/plain`
-/// — a `report.csv` filename is a stronger signal for plain-ASCII
-/// payloads than the byte-level fact "this looks textish". The
+/// filename. After signatures, the filename hint and the byte-level
+/// printable-ASCII heuristic are reconciled with the same rule as
+/// `detect_with_extension` (#127): a text-treatable filename type
+/// beats `text/plain` for specificity, but a binary-looking filename
+/// loses to the byte heuristic when the bytes are text-shaped. The
 /// printable-ASCII fallback is still used as a last resort when
 /// neither the byte signature nor the filename's extension is
 /// recognisable.
@@ -597,8 +605,41 @@ pub fn detect_with_filename_strict(
   filename: String,
 ) -> Result(MimeType, SimpleDetectionError) {
   detect_signature_only(bytes)
-  |> result.lazy_or(fn() { filename_to_mime_type_strict(filename) })
-  |> result.lazy_or(fn() { detect_strict(bytes) })
+  |> result.lazy_or(fn() {
+    reconcile_extension_and_text(
+      filename_to_mime_type_strict(filename),
+      detect_strict(bytes),
+    )
+  })
+}
+
+/// Pick between an extension/filename hint and the printable-ASCII
+/// text heuristic.
+///
+/// Both inputs are `Result(MimeType, _)` — when only one succeeds,
+/// that one is returned (or its error). When both succeed they
+/// disagree: the hint says some MIME type, the byte heuristic says
+/// `text/plain`. The hint wins only if it is itself a text-treatable
+/// type (`is_text/1`); otherwise the byte heuristic wins, since
+/// trusting a binary extension on text-shaped bytes would let an
+/// attacker disguise text payloads as images (#127).
+fn reconcile_extension_and_text(
+  by_hint: Result(MimeType, SimpleDetectionError),
+  by_text: Result(MimeType, SimpleDetectionError),
+) -> Result(MimeType, SimpleDetectionError) {
+  case by_hint {
+    // Text-treatable extension wins for specificity (.csv beats
+    // text/plain). Binary-claiming extension on text bytes loses:
+    // prefer the byte heuristic and only fall back to the
+    // extension when the bytes have no text shape either.
+    Ok(hint) ->
+      case is_text(hint) {
+        True -> Ok(hint)
+        False -> result.lazy_or(by_text, fn() { Ok(hint) })
+      }
+    // No extension: take whatever the text heuristic produced.
+    _ -> by_text
+  }
 }
 
 // ---------------------------------------------------------------------------

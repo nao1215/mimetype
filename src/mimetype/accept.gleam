@@ -23,6 +23,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/order.{type Order, Eq}
+import gleam/result
 import gleam/string
 import mimetype.{type MimeType}
 import mimetype/internal/accept as accept_internal
@@ -519,4 +520,127 @@ fn find_q(items: List(ValueItem), value: String) -> Option(Float) {
     }
   })
   |> option.from_result
+}
+
+// ---------------------------------------------------------------------------
+// String convenience wrappers (#125)
+// ---------------------------------------------------------------------------
+
+/// Reasons `negotiate_strings` / `negotiate_encoding_strings` /
+/// `negotiate_charset_strings` / `negotiate_language_strings` can
+/// return without a selection.
+pub type NegotiateError {
+  /// The `Accept` header could not be parsed. Carries the underlying
+  /// `AcceptError` so callers routing to a `400 Bad Request` can
+  /// surface the failing offset / shape verbatim.
+  InvalidHeader(reason: AcceptError)
+  /// An offer string was not a valid `type/subtype`. Carries the
+  /// rejected offer so the caller knows which entry to fix.
+  InvalidOffer(raw: String)
+  /// All entries parsed cleanly but no offer was acceptable to the
+  /// client (e.g. every match had `q=0`, or the offer list was
+  /// empty). Maps to `406 Not Acceptable`.
+  NoOverlap
+}
+
+/// Negotiate against a raw `Accept` header and a list of server
+/// offer strings.
+///
+/// Returns the selected offer **verbatim from `offers`** (not the
+/// parsed-and-rendered MimeType), so callers can compare the result
+/// against their own routing table without re-parsing.
+///
+/// `Error(InvalidHeader(_))` lets the caller route a malformed client
+/// header to `400`; `Error(InvalidOffer(_))` lets it route a buggy
+/// server configuration to `500`; `Error(NoOverlap)` maps cleanly to
+/// `406 Not Acceptable`. The previous three-step ceremony
+/// (`accept.parse` → `mimetype.parse` × n → `negotiate` → render)
+/// collapses into a single call.
+pub fn negotiate_strings(
+  header header: String,
+  offers offers: List(String),
+) -> Result(String, NegotiateError) {
+  use parsed <- result.try(parse_header(header))
+  use offer_pairs <- result.try(parse_offers(offers))
+  let offer_mts = list.map(offer_pairs, fn(p) { p.1 })
+  case negotiate(client_accepts: parsed, server_offers: offer_mts) {
+    None -> Error(NoOverlap)
+    Some(selected) -> Ok(lookup_original(offer_pairs, selected))
+  }
+}
+
+/// Negotiate against a raw `Accept-Encoding` header and a list of
+/// encoding offer strings. Returns the selected encoding **verbatim**
+/// from `offers`.
+pub fn negotiate_encoding_strings(
+  header header: String,
+  offers offers: List(String),
+) -> Result(String, NegotiateError) {
+  negotiate_value_strings(parse_encoding(header), offers)
+}
+
+/// Negotiate against a raw `Accept-Charset` header and a list of
+/// charset offer strings.
+pub fn negotiate_charset_strings(
+  header header: String,
+  offers offers: List(String),
+) -> Result(String, NegotiateError) {
+  negotiate_value_strings(parse_charset(header), offers)
+}
+
+/// Negotiate against a raw `Accept-Language` header and a list of
+/// language tag offer strings.
+pub fn negotiate_language_strings(
+  header header: String,
+  offers offers: List(String),
+) -> Result(String, NegotiateError) {
+  negotiate_value_strings(parse_language(header), offers)
+}
+
+fn negotiate_value_strings(
+  parsed: Result(List(ValueItem), AcceptError),
+  offers: List(String),
+) -> Result(String, NegotiateError) {
+  use items <- result.try(case parsed {
+    Ok(items) -> Ok(items)
+    Error(e) -> Error(InvalidHeader(reason: e))
+  })
+  case negotiate_value(client_accepts: items, server_offers: offers) {
+    None -> Error(NoOverlap)
+    Some(selected) -> Ok(selected)
+  }
+}
+
+fn parse_header(header: String) -> Result(List(AcceptItem), NegotiateError) {
+  case parse(header) {
+    Ok(items) -> Ok(items)
+    Error(e) -> Error(InvalidHeader(reason: e))
+  }
+}
+
+fn parse_offers(
+  offers: List(String),
+) -> Result(List(#(String, MimeType)), NegotiateError) {
+  list.try_map(offers, fn(raw) {
+    case mimetype.parse(raw) {
+      Ok(mt) -> Ok(#(raw, mt))
+      Error(_) -> Error(InvalidOffer(raw: raw))
+    }
+  })
+}
+
+fn lookup_original(
+  pairs: List(#(String, MimeType)),
+  selected: MimeType,
+) -> String {
+  let selected_essence = mimetype.essence_of(selected)
+  case
+    list.find(pairs, fn(p) { mimetype.essence_of(p.1) == selected_essence })
+  {
+    Ok(#(raw, _)) -> raw
+    // The selected MimeType always came from `pairs`, so this branch
+    // is unreachable. Return the rendered form as a defensive fallback
+    // rather than panicking in user code.
+    Error(Nil) -> mimetype.to_string(selected)
+  }
 }

@@ -252,7 +252,16 @@ pub fn is_image(mt: MimeType) -> Bool {
   predicates_internal.is_image_essence(mt.essence)
 }
 
-/// Return `True` when the MIME type's top-level media type is `text`.
+/// Return `True` when `mt` is safe to treat as text: the `text/*`
+/// family, plus `application/*` types whose payload is inherently
+/// text-encoded.
+///
+/// The latter set covers `application/json` (RFC 8259 §8.1 mandates
+/// UTF-8 / UTF-16 / UTF-32), `application/javascript` /
+/// `application/ecmascript`, `application/sql` / `application/x-sql`,
+/// and every RFC 6839 §3.1 `+json` / `+xml` structured-syntax-suffix
+/// type. Callers that want a strictly top-level `text/*` check should
+/// use `string.starts_with(essence_of(mt), "text/")` directly.
 pub fn is_text(mt: MimeType) -> Bool {
   predicates_internal.is_text_essence(mt.essence)
 }

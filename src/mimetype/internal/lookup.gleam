@@ -21,8 +21,28 @@ pub fn essence_for_extension(normalized: String) -> Result(String, Nil) {
 
 /// Return all known extensions for an essence. `Error(Nil)` means the
 /// essence is not in the generated database.
+///
+/// Common community-standard aliases (e.g. `audio/mp3` for the IANA
+/// `audio/mpeg`) are canonicalised before the lookup so both spellings
+/// yield the same extension set. The DB itself is regenerated from
+/// upstream `jshttp/mime-db`, so aliases live here rather than in the
+/// FFI tables.
 pub fn extensions_for_essence(essence: String) -> Result(List(String), Nil) {
-  db.mime_type_to_extensions(essence)
+  db.mime_type_to_extensions(canonical_essence(essence))
+}
+
+/// Map widely-used but non-IANA media-type spellings onto their
+/// IANA-registered canonical form for downstream lookups. `audio/mp3`
+/// is the only entry today (the MP3 file format's IANA name is
+/// `audio/mpeg`; `audio/mp3` is community-standard but kept here so
+/// every caller sees the same extension set). New aliases must be
+/// genuinely interchangeable — same payload format, same extension
+/// set — not merely related types.
+fn canonical_essence(essence: String) -> String {
+  case essence {
+    "audio/mp3" -> "audio/mpeg"
+    _ -> essence
+  }
 }
 
 /// Trim, drop any leading dots, and lowercase a raw extension string.

@@ -473,3 +473,98 @@ pub fn html_with_avif_and_webp_test() {
   ])
   |> should.equal(Some(mt("text/html")))
 }
+
+// --- #125 negotiate_strings convenience wrappers ---------------------
+
+pub fn negotiate_strings_picks_highest_q_test() {
+  accept.negotiate_strings(header: "text/html;q=0.5, application/json", offers: [
+    "application/json",
+    "text/html",
+  ])
+  |> should.equal(Ok("application/json"))
+}
+
+pub fn negotiate_strings_returns_verbatim_offer_test() {
+  // Returned string is the original input form (not the parsed and
+  // re-rendered MimeType), so it can be compared directly against a
+  // routing table.
+  accept.negotiate_strings(header: "application/json", offers: [
+    "APPLICATION/JSON",
+  ])
+  |> should.equal(Ok("APPLICATION/JSON"))
+}
+
+pub fn negotiate_strings_no_overlap_test() {
+  accept.negotiate_strings(header: "image/png", offers: [
+    "text/html",
+    "application/json",
+  ])
+  |> should.equal(Error(accept.NoOverlap))
+}
+
+pub fn negotiate_strings_empty_offers_test() {
+  accept.negotiate_strings(header: "*/*", offers: [])
+  |> should.equal(Error(accept.NoOverlap))
+}
+
+pub fn negotiate_strings_invalid_header_test() {
+  let result =
+    accept.negotiate_strings(
+      header: "this is/not a header at all;;;q=oops",
+      offers: ["text/html"],
+    )
+  case result {
+    Error(accept.InvalidHeader(_)) -> Nil
+    _ -> should.fail()
+  }
+}
+
+pub fn negotiate_strings_invalid_offer_test() {
+  let result =
+    accept.negotiate_strings(header: "*/*", offers: [
+      "text/html",
+      "not-a-mime-type",
+    ])
+  case result {
+    Error(accept.InvalidOffer(raw: "not-a-mime-type")) -> Nil
+    _ -> should.fail()
+  }
+}
+
+pub fn negotiate_strings_wildcard_picks_first_offer_test() {
+  accept.negotiate_strings(header: "*/*", offers: [
+    "application/json",
+    "text/html",
+  ])
+  |> should.equal(Ok("application/json"))
+}
+
+pub fn negotiate_encoding_strings_test() {
+  accept.negotiate_encoding_strings(header: "gzip, br;q=0.9", offers: [
+    "br",
+    "gzip",
+    "identity",
+  ])
+  |> should.equal(Ok("gzip"))
+}
+
+pub fn negotiate_encoding_strings_no_overlap_test() {
+  accept.negotiate_encoding_strings(header: "br", offers: ["gzip"])
+  |> should.equal(Error(accept.NoOverlap))
+}
+
+pub fn negotiate_charset_strings_test() {
+  accept.negotiate_charset_strings(header: "utf-8", offers: [
+    "utf-8",
+    "iso-8859-1",
+  ])
+  |> should.equal(Ok("utf-8"))
+}
+
+pub fn negotiate_language_strings_test() {
+  accept.negotiate_language_strings(header: "en-US, en;q=0.9, *;q=0.1", offers: [
+    "en-US",
+    "de",
+  ])
+  |> should.equal(Ok("en-US"))
+}

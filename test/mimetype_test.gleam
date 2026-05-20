@@ -615,7 +615,63 @@ pub fn family_predicates_use_essence_test() {
   mimetype.is_video(mt("video/mp4"))
   |> should.equal(True)
 
+  // application/json is text-treatable per RFC 8259 §8.1.
   mimetype.is_image(mt("application/json"))
+  |> should.equal(False)
+}
+
+// #129: `is_text` should recognise JSON-family and `+xml`-suffix types
+// as text-treatable. RFC 8259 §8.1 (JSON must be UTF-8/16/32 encoded)
+// and the XML 1.0 specs mean these payloads are inherently text — log
+// viewers, editors, and HTTP intermediaries all treat them that way.
+
+pub fn is_text_application_json_test() {
+  mimetype.is_text(mt("application/json"))
+  |> should.equal(True)
+}
+
+pub fn is_text_ld_plus_json_test() {
+  mimetype.is_text(mt("application/ld+json"))
+  |> should.equal(True)
+}
+
+pub fn is_text_hal_plus_json_test() {
+  mimetype.is_text(mt("application/hal+json"))
+  |> should.equal(True)
+}
+
+pub fn is_text_manifest_plus_json_test() {
+  mimetype.is_text(mt("application/manifest+json"))
+  |> should.equal(True)
+}
+
+pub fn is_text_xhtml_plus_xml_test() {
+  mimetype.is_text(mt("application/xhtml+xml"))
+  |> should.equal(True)
+}
+
+pub fn is_text_svg_plus_xml_test() {
+  mimetype.is_text(mt("image/svg+xml"))
+  |> should.equal(True)
+}
+
+pub fn is_text_application_xml_test() {
+  mimetype.is_text(mt("application/xml"))
+  |> should.equal(True)
+}
+
+pub fn is_text_application_javascript_test() {
+  mimetype.is_text(mt("application/javascript"))
+  |> should.equal(True)
+}
+
+pub fn is_text_binary_image_returns_false_test() {
+  mimetype.is_text(mt("image/png"))
+  |> should.equal(False)
+}
+
+pub fn is_text_application_octet_stream_returns_false_test() {
+  mimetype.is_text(mt("application/octet-stream"))
   |> should.equal(False)
 }
 

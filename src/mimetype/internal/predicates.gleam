@@ -16,8 +16,27 @@ pub fn is_image_essence(essence: String) -> Bool {
   string.starts_with(essence, "image/")
 }
 
+/// A media type that callers can safely treat as text: the `text/*`
+/// family plus a curated set of `application/*` types whose payload is
+/// inherently text-encoded.
+///
+/// Recognises `application/json` (RFC 8259 §8.1 mandates UTF-8 / UTF-16
+/// / UTF-32 encoding), `application/javascript` /
+/// `application/ecmascript`, the SQL family
+/// (`application/sql`, `application/x-sql`), and every RFC 6839 §3.1
+/// `+json` / `+xml` structured-syntax-suffix type. Callers that want a
+/// strictly `text/*` check should use `starts_with(essence_of(mt),
+/// "text/")` directly.
 pub fn is_text_essence(essence: String) -> Bool {
   string.starts_with(essence, "text/")
+  || essence == "application/json"
+  || essence == "application/xml"
+  || essence == "application/javascript"
+  || essence == "application/ecmascript"
+  || essence == "application/sql"
+  || essence == "application/x-sql"
+  || string.ends_with(essence, "+json")
+  || string.ends_with(essence, "+xml")
 }
 
 pub fn is_audio_essence(essence: String) -> Bool {

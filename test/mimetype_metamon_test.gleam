@@ -73,18 +73,24 @@ pub fn is_image_holds_iff_essence_starts_with_image_slash_test() -> Nil {
   )
 }
 
-pub fn is_text_holds_iff_essence_starts_with_text_slash_test() -> Nil {
-  metamon.forall(
-    generator.element_of([
-      "text/plain", "text/html", "text/csv", "image/png", "application/json",
-      "video/mp4",
-    ]),
-    fn(essence) {
-      let assert Ok(parsed) = mimetype.parse(essence)
-      mimetype.is_text(parsed)
-      == string.starts_with(mimetype.essence_of(parsed), "text/")
-    },
-  )
+pub fn is_text_holds_for_text_family_and_json_xml_test() -> Nil {
+  // Post-#129 contract: `is_text` is True for `text/*` AND for
+  // text-encoded `application/*` payloads (JSON / JS / SQL families)
+  // AND for any `*+json` / `*+xml` structured-syntax-suffix type.
+  // Binary `application/*` and image / video types stay False.
+  let text_essences = [
+    "text/plain", "text/html", "text/csv", "application/json", "application/xml",
+    "application/ld+json", "application/xhtml+xml", "image/svg+xml",
+  ]
+  let binary_essences = ["image/png", "video/mp4", "application/octet-stream"]
+  metamon.forall(generator.element_of(text_essences), fn(essence) {
+    let assert Ok(parsed) = mimetype.parse(essence)
+    mimetype.is_text(parsed)
+  })
+  metamon.forall(generator.element_of(binary_essences), fn(essence) {
+    let assert Ok(parsed) = mimetype.parse(essence)
+    !mimetype.is_text(parsed)
+  })
 }
 
 pub fn is_a_is_reflexive_test() -> Nil {

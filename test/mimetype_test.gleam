@@ -70,6 +70,64 @@ pub fn extension_to_mime_type_normalizes_input_test() {
   |> should_be_mime("application/json")
 }
 
+// Issue #139: `.mp4` used to resolve to application/mp4 because the
+// alphabetical tiebreak preferred it over video/mp4 even though every
+// other resolver (Python mimetypes, jshttp/mime-types, browsers)
+// picks video/mp4. The codegen now consults an explicit preference
+// map for ambiguous extensions.
+pub fn extension_to_mime_type_mp4_test() {
+  mimetype.extension_to_mime_type("mp4")
+  |> should_be_mime("video/mp4")
+}
+
+pub fn filename_to_mime_type_mp4_test() {
+  mimetype.filename_to_mime_type("a.mp4")
+  |> should_be_mime("video/mp4")
+}
+
+pub fn filename_to_mime_type_mp4_case_insensitive_test() {
+  mimetype.filename_to_mime_type("a.MP4")
+  |> should_be_mime("video/mp4")
+}
+
+pub fn extension_to_mime_type_mp4v_test() {
+  // mp4v belongs to video/mp4 only — guard against any regression on
+  // the disambiguating tiebreak that doesn't touch mp4v's row.
+  mimetype.extension_to_mime_type("mp4v")
+  |> should_be_mime("video/mp4")
+}
+
+pub fn extension_to_mime_type_mp4s_unchanged_test() {
+  // mp4s is unambiguously application/mp4 in mime-db — the
+  // preference map must NOT over-correct and route every mp4* into
+  // video/mp4.
+  mimetype.extension_to_mime_type("mp4s")
+  |> should_be_mime("application/mp4")
+}
+
+pub fn extension_to_mime_type_m4a_unchanged_test() {
+  // Companion ambiguous extension that mime-db already disambiguates
+  // as audio/mp4 — regression-guard against the preference map
+  // accidentally widening its reach.
+  mimetype.extension_to_mime_type("m4a")
+  |> should_be_mime("audio/mp4")
+}
+
+// Issue #140: `.mkv` used to resolve to video/matroska because of the
+// same alphabetical tiebreak. The canonical type per README, Python
+// mimetypes, Apache mime.types, and nginx is video/x-matroska, which
+// also carries the full extension list (mkv, mk3d, mks) in the
+// reverse table.
+pub fn extension_to_mime_type_mkv_test() {
+  mimetype.extension_to_mime_type("mkv")
+  |> should_be_mime("video/x-matroska")
+}
+
+pub fn filename_to_mime_type_mkv_test() {
+  mimetype.filename_to_mime_type("x.mkv")
+  |> should_be_mime("video/x-matroska")
+}
+
 pub fn extension_to_mime_type_empty_string_falls_back_to_default_test() {
   mimetype.extension_to_mime_type("")
   |> should_be_mime("application/octet-stream")

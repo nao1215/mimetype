@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `mimetype.extension_to_mime_type("mp4")` and `mimetype.filename_to_mime_type("*.mp4")` now return `video/mp4` instead of `application/mp4`, matching Python `mimetypes.guess_type`, jshttp/`mime-types`, every major browser's `Content-Type`, and the upstream `mime-db` consumer convention. `mp4` is listed under both `application/mp4` and `video/mp4` in `mime-db`, and the previous alphabetical tiebreak in the codegen picked the wrong primary type — `application/mp4` is a rare MPEG-4 metadata format, while `video/mp4` is what every web `.mp4` video actually carries. The codegen script (`scripts/generate_mime_db.sh`) now consults an explicit preference map for this kind of ambiguous extension before falling back to the source-priority + alphabetical tiebreak. `mp4v`, `mp4s`, `m4a`, and the other unambiguous mp4-family extensions are unaffected. The reverse table is unchanged (`application/mp4` still lists `mp4` in its extensions array, since both types do per `mime-db`). (#139)
+- `mimetype.extension_to_mime_type("mkv")` and `mimetype.filename_to_mime_type("*.mkv")` now return `video/x-matroska` instead of `video/matroska`, matching the canonical type already documented in the README and CHANGELOG, the inverse lookup (`mime_type_to_extensions(video/x-matroska)` lists `mkv`, `mk3d`, `mks`), Python `mimetypes.guess_type`, Apache `mime.types`, nginx, and MDN. Both forms exist in the database; the forward lookup used to disagree with the inverse lookup because of the same alphabetical tiebreak fixed for `.mp4`. The preference map in `scripts/generate_mime_db.sh` is the single source of truth so the two tables stay aligned. (#140)
+
 ## [0.22.0] - 2026-05-20
 
 ### Changed

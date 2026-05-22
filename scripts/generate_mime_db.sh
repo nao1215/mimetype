@@ -158,7 +158,15 @@ extension_to_mime_table() ->
     #{
 EOF
   jq -r '
-    to_entries
+    # Explicit per-extension preferences for cases where mime-db
+    # lists multiple iana-sourced types for the same extension and
+    # mime-types / Python mimetypes / browsers pick a specific one
+    # by convention. Without these, the alphabetical tiebreak picks
+    # the wrong primary type (e.g. application/mp4 over video/mp4
+    # for .mp4, video/matroska over video/x-matroska for .mkv).
+    # Mirrors the spirit of the jshttp/mime-types preference list.
+    {"mp4": "video/mp4", "mkv": "video/x-matroska"} as $preference
+    | to_entries
     | map(select(.value.extensions != null) | {
         mime: .key,
         source: (.value.source // "custom"),
@@ -173,6 +181,8 @@ EOF
     | group_by(.ext)
     | map(
         sort_by(
+          # Explicit preference wins outright (0 before everything).
+          (if $preference[.ext] == .mime then 0 else 1 end),
           (if .source == "iana" then 0
            elif .source == "apache" then 1
            elif .source == "nginx" then 2
@@ -256,7 +266,11 @@ const missing = /* @__PURE__ */ Result\$Error(undefined);
 const extensionToMime = /* @__PURE__ */ new Map([
 EOF
   jq -r '
-    to_entries
+    # Same preference map as the Erlang generator above. Keep the
+    # two in sync — they generate sibling FFI tables that callers
+    # expect to agree.
+    {"mp4": "video/mp4", "mkv": "video/x-matroska"} as $preference
+    | to_entries
     | map(select(.value.extensions != null) | {
         mime: .key,
         source: (.value.source // "custom"),
@@ -271,6 +285,7 @@ EOF
     | group_by(.ext)
     | map(
         sort_by(
+          (if $preference[.ext] == .mime then 0 else 1 end),
           (if .source == "iana" then 0
            elif .source == "apache" then 1
            elif .source == "nginx" then 2

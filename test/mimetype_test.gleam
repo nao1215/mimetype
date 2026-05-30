@@ -2688,3 +2688,65 @@ pub fn detect_with_filename_handles_path_components_test() {
   mimetype.detect_with_filename(<<>>, "/tmp/files/note.pdf")
   |> should_be_mime("application/pdf")
 }
+
+// Issue #143: parse_strict rejects the RFC 7231 §3.1.1.1 parameter-list
+// violations that lenient `parse` silently drops — a trailing `;` with no
+// parameter, a parameter missing its `=value`, and an empty parameter name.
+// `parse` stays lenient by design (real HTTP Content-Type headers carry
+// stray semicolons); these tests pin both halves so neither contract drifts.
+
+pub fn parse_strict_rejects_trailing_semicolon_test() {
+  let assert Error(mimetype.MalformedParameter(_)) =
+    mimetype.parse_strict("text/plain; ")
+}
+
+pub fn parse_strict_rejects_bare_semicolon_test() {
+  let assert Error(mimetype.MalformedParameter(_)) =
+    mimetype.parse_strict("text/plain;")
+}
+
+pub fn parse_strict_rejects_consecutive_semicolons_test() {
+  let assert Error(mimetype.MalformedParameter(_)) =
+    mimetype.parse_strict("text/plain; charset=utf-8;;")
+}
+
+pub fn parse_strict_rejects_missing_equals_test() {
+  let assert Error(mimetype.MalformedParameter(_)) =
+    mimetype.parse_strict("text/plain; key")
+}
+
+pub fn parse_strict_rejects_empty_parameter_name_test() {
+  let assert Error(mimetype.MalformedParameter(_)) =
+    mimetype.parse_strict("text/plain;=value")
+}
+
+pub fn parse_strict_accepts_well_formed_parameters_test() {
+  mimetype.parse_strict("text/plain; charset=utf-8")
+  |> result.map(mimetype.to_string)
+  |> should.equal(Ok("text/plain; charset=utf-8"))
+}
+
+pub fn parse_strict_accepts_no_parameters_test() {
+  mimetype.parse_strict("text/plain")
+  |> result.map(mimetype.to_string)
+  |> should.equal(Ok("text/plain"))
+}
+
+// parse_strict still surfaces the existing strict checks.
+pub fn parse_strict_still_rejects_non_token_name_test() {
+  let assert Error(mimetype.InvalidParameterName(_)) =
+    mimetype.parse_strict("text/plain; chars et=utf-8")
+}
+
+// Lenient parse keeps dropping the malformed segments (documented contract).
+pub fn parse_lenient_drops_malformed_parameters_test() {
+  mimetype.parse("text/plain; ")
+  |> result.map(mimetype.to_string)
+  |> should.equal(Ok("text/plain"))
+  mimetype.parse("text/plain; key")
+  |> result.map(mimetype.to_string)
+  |> should.equal(Ok("text/plain"))
+  mimetype.parse("text/plain;=value")
+  |> result.map(mimetype.to_string)
+  |> should.equal(Ok("text/plain"))
+}

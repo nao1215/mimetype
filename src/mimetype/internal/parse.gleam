@@ -39,6 +39,12 @@ pub type ParseFailure {
   /// `parameter` is the parameter name whose value was rejected so
   /// the caller can render an actionable error.
   InvalidParameterValue(parameter: String, byte: Int)
+  /// A `;`-separated segment was not a well-formed `name=value`
+  /// parameter — a trailing / bare / consecutive `;` (empty segment),
+  /// a segment with no `=value`, or an empty parameter name (`;=v`).
+  /// Only the strict parse path emits this; the lenient path drops
+  /// such segments. Carries the offending segment (trimmed).
+  MalformedParameter(segment: String)
 }
 
 /// Parse a wire-format MIME string into its essence + parameter list.
@@ -52,6 +58,24 @@ pub type ParseFailure {
 pub fn parse_string(
   input: String,
 ) -> Result(#(String, List(#(String, String))), ParseFailure) {
+  parse_string_with(input, strict: False)
+}
+
+/// Strict variant of [`parse_string`](#parse_string): each `;`-separated
+/// segment MUST be a well-formed `name=value` parameter per RFC 7231
+/// §3.1.1.1. A trailing / bare / consecutive `;`, a segment with no
+/// `=value`, and an empty parameter name are rejected with
+/// `MalformedParameter(segment)` instead of being silently dropped.
+pub fn parse_string_strict(
+  input: String,
+) -> Result(#(String, List(#(String, String))), ParseFailure) {
+  parse_string_with(input, strict: True)
+}
+
+fn parse_string_with(
+  input: String,
+  strict strict: Bool,
+) -> Result(#(String, List(#(String, String))), ParseFailure) {
   let trimmed = string.trim(input)
   use <- bool.guard(when: trimmed == "", return: Error(Empty))
   case split_on_unquoted_semicolons(trimmed) {
@@ -62,7 +86,7 @@ pub fn parse_string(
         when: !valid_essence(essence_value),
         return: Error(InvalidEssence(input)),
       )
-      case parse_parameters(rest) {
+      case parse_parameters(rest, strict) {
         Ok(parameters) -> Ok(#(essence_value, parameters))
         Error(e) -> Error(e)
       }
@@ -164,27 +188,40 @@ fn is_tchar(cp: Int) -> Bool {
 
 fn parse_parameters(
   segments: List(String),
+  strict: Bool,
 ) -> Result(List(#(String, String)), ParseFailure) {
   segments
-  |> list.try_fold([], parse_parameter_segment)
+  |> list.try_fold([], fn(acc, seg) {
+    parse_parameter_segment(acc, seg, strict)
+  })
   |> result.map(list.reverse)
 }
 
-// Same lenience as the previous `list.filter_map` shape for
-// non-`name=value` and empty-name segments — a stray `;` mid-string
-// should not abort the parse. Forbidden control bytes inside a value
-// abort, naming the offending parameter.
+// Lenient (`strict: False`): non-`name=value` and empty-name segments are
+// dropped so a stray `;` mid-string does not abort the parse — the
+// behaviour real-world HTTP `Content-Type` headers rely on. Strict
+// (`strict: True`, via `parse_string_strict`): the same segments are
+// rejected with `MalformedParameter` per RFC 7231 §3.1.1.1. Forbidden
+// control bytes inside a value abort in both modes, naming the parameter.
 fn parse_parameter_segment(
   acc: List(#(String, String)),
   seg: String,
+  strict: Bool,
 ) -> Result(List(#(String, String)), ParseFailure) {
   case string.split_once(seg, on: "=") {
-    Error(Nil) -> Ok(acc)
+    Error(Nil) ->
+      case strict {
+        True -> Error(MalformedParameter(segment: string.trim(seg)))
+        False -> Ok(acc)
+      }
     Ok(#(name, value)) -> {
       let trimmed_name = string.trim(name)
       let normalized_name = string.lowercase(trimmed_name)
       let normalized_value = value |> string.trim |> unquote_value
-      use <- bool.guard(when: normalized_name == "", return: Ok(acc))
+      use <- bool.guard(when: normalized_name == "", return: case strict {
+        True -> Error(MalformedParameter(segment: string.trim(seg)))
+        False -> Ok(acc)
+      })
       // RFC 9110 §5.6.6 / RFC 7230 §3.2.6: parameter-name = token.
       // Reject whitespace and other non-tchar codepoints in names so
       // round-tripping through `serialise` cannot emit a malformed

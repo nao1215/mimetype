@@ -61,6 +61,13 @@ pub type ParseError {
   /// Allowed: HTAB (0x09) and every byte at or above 0x20 except DEL
   /// (0x7F). Rejected: 0x00-0x08, 0x0A-0x1F, 0x7F.
   InvalidParameterValue(parameter: String, byte: Int)
+  /// A `;`-separated segment was not a well-formed `name=value`
+  /// parameter — a trailing / bare / consecutive `;` (empty segment),
+  /// a segment with no `=value`, or an empty parameter name (`;=v`) —
+  /// all RFC 7231 §3.1.1.1 violations. Only `parse_strict/1` returns
+  /// this; the lenient `parse/1` silently drops such segments. Carries
+  /// the offending segment (trimmed).
+  MalformedParameter(segment: String)
 }
 
 /// Reasons the strict detection family can return `Error(_)`.
@@ -155,7 +162,32 @@ pub const default_detection_limit = 3072
 ///   except HTAB `0x09`, and DEL `0x7F`). These bytes would produce
 ///   a malformed `Content-Type` header on the wire.
 pub fn parse(input: String) -> Result(MimeType, ParseError) {
-  case parse_internal.parse_string(input) {
+  parse_internal.parse_string(input) |> map_parse_result
+}
+
+/// Strict counterpart of [`parse/1`](#parse). In addition to everything
+/// `parse` rejects, each `;`-separated segment MUST be a well-formed
+/// `name=value` parameter per RFC 7231 §3.1.1.1 — a trailing / bare /
+/// consecutive `;`, a segment with no `=value`, and an empty parameter
+/// name are rejected with `Error(MalformedParameter(segment))` instead of
+/// being silently dropped.
+///
+/// `parse/1` stays lenient because real-world HTTP `Content-Type` headers
+/// commonly carry stray semicolons and whitespace; reach for `parse_strict`
+/// when the input must conform to the RFC grammar exactly (validating a
+/// configuration value, a manifest field, or test fixtures), so a malformed
+/// parameter list is reported rather than quietly thrown away.
+pub fn parse_strict(input: String) -> Result(MimeType, ParseError) {
+  parse_internal.parse_string_strict(input) |> map_parse_result
+}
+
+fn map_parse_result(
+  result: Result(
+    #(String, List(#(String, String))),
+    parse_internal.ParseFailure,
+  ),
+) -> Result(MimeType, ParseError) {
+  case result {
     Ok(#(essence, parameters)) ->
       Ok(MimeType(essence: essence, parameters: parameters))
     Error(parse_internal.Empty) -> Error(EmptyMimeType)
@@ -165,6 +197,8 @@ pub fn parse(input: String) -> Result(MimeType, ParseError) {
       Error(InvalidParameterName(name: name))
     Error(parse_internal.InvalidParameterValue(parameter:, byte:)) ->
       Error(InvalidParameterValue(parameter: parameter, byte: byte))
+    Error(parse_internal.MalformedParameter(segment:)) ->
+      Error(MalformedParameter(segment: segment))
   }
 }
 
@@ -667,6 +701,10 @@ fn from_internal(s: String) -> MimeType {
     Error(parse_internal.InvalidParameterName(_)) ->
       MimeType(essence: s |> string.trim |> string.lowercase, parameters: [])
     Error(parse_internal.InvalidParameterValue(_, _)) ->
+      MimeType(essence: s |> string.trim |> string.lowercase, parameters: [])
+    // `parse_string` is the lenient parser and never emits this, but the
+    // match must stay exhaustive — fall back to the bare essence too.
+    Error(parse_internal.MalformedParameter(_)) ->
       MimeType(essence: s |> string.trim |> string.lowercase, parameters: [])
   }
 }

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-05-30
+
 ### Added
 
 - `mimetype.parse_strict(input) -> Result(MimeType, ParseError)` — strict counterpart of `parse/1` that rejects the RFC 7231 §3.1.1.1 parameter-list violations the lenient parser silently drops: a trailing / bare / consecutive `;` (empty segment), a parameter with no `=value`, and an empty parameter name (`;=value`). These now return `Error(MalformedParameter(segment))`, naming the offending segment, instead of being thrown away — so callers validating a configuration value, a manifest field, or test fixtures can tell "no parameters" from "three malformed parameters we dropped". `parse/1` stays lenient by design (real-world HTTP `Content-Type` headers carry stray semicolons and whitespace) and is unchanged. A new `MalformedParameter(segment: String)` variant is added to `ParseError`. (#143)

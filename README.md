@@ -1,5 +1,10 @@
 # mimetype
 
+[![Package Version](https://img.shields.io/hexpm/v/mimetype)](https://hex.pm/packages/mimetype)
+[![Hex Downloads](https://img.shields.io/hexpm/dt/mimetype)](https://hex.pm/packages/mimetype)
+[![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/mimetype/)
+[![CI](https://github.com/nao1215/mimetype/actions/workflows/ci.yml/badge.svg)](https://github.com/nao1215/mimetype/actions/workflows/ci.yml)
+
 MIME type lookup and magic-number detection for Gleam on Erlang and JavaScript targets.
 
 ## Features

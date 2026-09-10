@@ -1,6 +1,6 @@
 % This file contains data derived from jshttp/mime-db.
 % Upstream: https://github.com/jshttp/mime-db
-% Generated from jshttp/mime-db 1.54.0 (c03ddfc).
+% Generated from jshttp/mime-db 1.54.0 (ba120a7).
 % Regenerate with: bash scripts/generate_mime_db.sh
 % See THIRD_PARTY_NOTICES.md for the packaged notice text.
 %

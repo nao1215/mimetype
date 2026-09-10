@@ -427,7 +427,9 @@ pub fn mime_type_to_extensions(mt: MimeType) -> List(String) {
 ///
 /// Strict variant; returns `Error(Nil)` when the essence is not in the
 /// generated database.
-pub fn mime_type_to_extensions_strict(mt: MimeType) -> Result(List(String), Nil) {
+pub fn mime_type_to_extensions_strict(
+  mt: MimeType,
+) -> Result(List(String), Nil) {
   lookup_internal.extensions_for_essence(mt.essence)
 }
 
@@ -485,7 +487,9 @@ pub fn detect(bytes: BitArray) -> MimeType {
 /// non-empty input. Prefer this variant when the
 /// `application/octet-stream` fallback would be ambiguous; use
 /// `detect/1` when an unconditional `MimeType` is more convenient.
-pub fn detect_strict(bytes: BitArray) -> Result(MimeType, SimpleDetectionError) {
+pub fn detect_strict(
+  bytes: BitArray,
+) -> Result(MimeType, SimpleDetectionError) {
   detect_with_limit_strict(bytes, default_detection_limit)
 }
 

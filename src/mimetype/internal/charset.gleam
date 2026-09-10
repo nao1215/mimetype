@@ -201,7 +201,10 @@ fn attribute_value(text: String, attribute: String) -> Result(String, Nil) {
   Ok(string.lowercase(string.trim(raw)))
 }
 
-fn after_attribute_name(text: String, attribute: String) -> Result(String, Nil) {
+fn after_attribute_name(
+  text: String,
+  attribute: String,
+) -> Result(String, Nil) {
   case string.split_once(text, on: attribute) {
     Ok(#(_, after)) -> Ok(after)
     Error(Nil) -> Error(Nil)

@@ -544,7 +544,11 @@ fn json_skip_number_digits(bytes: BitArray, budget: Int) -> JsonResult {
   }
 }
 
-fn json_match_literal(bytes: BitArray, lit: BitArray, budget: Int) -> JsonResult {
+fn json_match_literal(
+  bytes: BitArray,
+  lit: BitArray,
+  budget: Int,
+) -> JsonResult {
   case bytes, lit {
     _, <<>> -> Valid(bytes, budget)
     <<>>, _ -> Truncated
@@ -671,7 +675,10 @@ fn match_ci_prefix(bytes: BitArray, prefix: BitArray) -> Result(BitArray, Nil) {
   }
 }
 
-fn match_byte_prefix(bytes: BitArray, prefix: BitArray) -> Result(BitArray, Nil) {
+fn match_byte_prefix(
+  bytes: BitArray,
+  prefix: BitArray,
+) -> Result(BitArray, Nil) {
   case prefix, bytes {
     <<>>, _ -> Ok(bytes)
     _, <<>> -> Error(Nil)

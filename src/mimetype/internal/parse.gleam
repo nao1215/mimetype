@@ -101,7 +101,10 @@ fn parse_string_with(
 /// RFC 7230 §3.2.6 — including the empty string and any value
 /// containing whitespace, `;`, `,`, `"`, etc. — are wrapped in a
 /// quoted-string with inner `"` and `\` backslash-escaped.
-pub fn serialise(essence: String, parameters: List(#(String, String))) -> String {
+pub fn serialise(
+  essence: String,
+  parameters: List(#(String, String)),
+) -> String {
   case parameters {
     [] -> essence
     _ -> {

@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
       # Same as the latest lane in ci.yml: formatter output differs between
       # compiler versions, and this job runs `just format-check`.
       - uses: erlef/setup-beam@v1

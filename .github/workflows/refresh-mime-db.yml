@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
 
       # Same compiler as the latest lane in ci.yml: the generator runs
       # `gleam format`, whose output differs between compiler versions.

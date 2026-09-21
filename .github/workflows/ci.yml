@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
       - uses: erlef/setup-beam@v1
         with:
           otp-version: "29"
@@ -65,7 +65,7 @@ jobs:
         target: [erlang, javascript]
     steps:
       - uses: actions/checkout@v7
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
       - uses: erlef/setup-beam@v1
         with:
           otp-version: "29"
@@ -87,7 +87,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
       - name: Verify README is in sync with magic.gleam
         run: just readme-check
 
@@ -96,7 +96,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
       - uses: erlef/setup-beam@v1
         with:
           otp-version: "29"

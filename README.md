@@ -4,6 +4,7 @@
 [![Hex Downloads](https://img.shields.io/hexpm/dt/mimetype)](https://hex.pm/packages/mimetype)
 [![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/mimetype/)
 [![CI](https://github.com/nao1215/mimetype/actions/workflows/ci.yml/badge.svg)](https://github.com/nao1215/mimetype/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/nao1215/mimetype/badge)](https://scorecard.dev/viewer/?uri=github.com/nao1215/mimetype)
 
 MIME type lookup and magic-number detection for Gleam on Erlang and JavaScript targets.
 

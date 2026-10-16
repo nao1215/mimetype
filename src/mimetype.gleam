@@ -124,10 +124,8 @@ pub type Reader(read_error) =
 /// Fallback `MimeType` returned by lenient detection / lookup helpers
 /// when no more specific answer is available. Equivalent to
 /// `application/octet-stream` with no parameters.
-pub const default_mime_type: MimeType = MimeType(
-  essence: "application/octet-stream",
-  parameters: [],
-)
+pub const default_mime_type: MimeType =
+  MimeType(essence: "application/octet-stream", parameters: [])
 
 /// Default upper bound on the number of leading bytes inspected by
 /// `detect` and `detect_strict`.

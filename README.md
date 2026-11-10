@@ -481,6 +481,20 @@ harness is intentionally not wired into PR-time CI gates — it is for
 local A/B comparison and ad-hoc investigation, not for blocking
 merges on micro-fluctuations.
 
+## Verifying releases
+
+Each GitHub Release attaches the package tarball (`mimetype-<version>.tar`), `checksums.txt`, a cosign signature bundle for it (`checksums.txt.sigstore.json`) and the build provenance (`mimetype-<version>.intoto.jsonl`). Download them from the release page, then verify:
+
+```sh
+gh attestation verify mimetype-<version>.tar --repo nao1215/mimetype
+
+sha256sum -c checksums.txt
+cosign verify-blob --bundle checksums.txt.sigstore.json \
+  --certificate-identity-regexp '^https://github.com/nao1215/mimetype/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  checksums.txt
+```
+
 ## Licensing
 
 The data tables under `src/mimetype/internal/` are generated from

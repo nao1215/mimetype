@@ -485,6 +485,17 @@ harness is intentionally not wired into PR-time CI gates — it is for
 local A/B comparison and ad-hoc investigation, not for blocking
 merges on micro-fluctuations.
 
+## Testing
+
+| Technique | Bug class caught here |
+|---|---|
+| Examples and unit tests | [Wrong signatures, lookups and parse errors](doc/testing.md#examples-and-unit-tests) |
+| Generated properties | [Round trips and predicates that break on unusual input](doc/testing.md#generated-properties) |
+| Differential testing | [Content negotiation that departs from RFC 9110; UTF-8 and JSON detection that disagree with the standard library and gleam_json](doc/testing.md#differential-testing) |
+| Metamorphic relations | [Order-dependent negotiation, lossy serialisation, detection reading past its limit](doc/testing.md#metamorphic-relations) |
+| Nightly runs | [Rare inputs the normal run count misses](doc/testing.md#nightly-runs) |
+| Mutation testing | [Assertions that miss a changed operator or branch](doc/testing.md#mutation-testing) |
+
 ## Verifying releases
 
 Each GitHub Release attaches the Hex package tarball (`mimetype-<version>.tar`),

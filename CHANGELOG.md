@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- `charset_of` no longer reports `utf-8` for overlong 3- and 4-byte sequences, encoded UTF-16 surrogates (`ED A0 80` to `ED BF BF`) or code points above U+10FFFF; it returns `Error(NoMatch)` for them like for other invalid UTF-8.
 - `accept.negotiate` and `accept.negotiate_strings` take an offer's q-value from the most specific matching media range, as RFC 9110 §12.5.1 requires. Before, the highest q among all matching ranges won, so `*/*, text/html;q=0` still selected text/html, and `text/*;q=0.3, */*;q=0.5` gave text/plain 0.5 instead of 0.3.
 
 ## [0.25.0] - 2026-09-10

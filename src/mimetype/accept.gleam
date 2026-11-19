@@ -262,10 +262,12 @@ fn specificity(range: MediaRange) -> Int {
 /// `server_offers` is empty).
 ///
 /// Special case: if every client item is `AnyType` with `q>0`, the
-/// server's first offer wins (server preference). Otherwise we score
-/// each server offer by the best matching client item — `(q,
-/// specificity, ext_count)` — and break ties by the order the offer
-/// appears in `server_offers`.
+/// server's first offer wins (server preference). Otherwise each server
+/// offer takes its q-value from the most specific matching client item
+/// (RFC 9110 §12.5.1: `text/html;q=0` excludes text/html even with
+/// `*/*` present). Offers are ranked by `(q, specificity, ext_count)`
+/// of that item, and ties go to the order the offer appears in
+/// `server_offers`.
 ///
 /// Matching is essence-only: parameter-level "more-specific" matching
 /// per RFC 9110 §12.5.1 is out of scope.
@@ -345,59 +347,47 @@ fn compare_offer_scores(
   int.compare(i_a, i_b)
 }
 
+/// RFC 9110 §12.5.1: of the client items matching `offer`, the most
+/// specific one (concrete > `type/*` > `*/*`, then more accept-ext
+/// parameters) decides the offer's q-value. A broader range never
+/// overrides it, so `text/html;q=0` excludes text/html even when `*/*`
+/// is present. Among equally specific items the highest q is used.
 fn best_match_for(
   offer: MimeType,
   client: List(AcceptItem),
 ) -> Option(MatchScore) {
   let offer_essence = mimetype.essence_of(offer)
-  client
-  |> list.filter_map(fn(item) {
-    case range_matches(item.range, offer_essence) {
-      True ->
-        case item.q >. 0.0 {
-          True ->
-            Ok(MatchScore(
-              q: item.q,
-              specificity: specificity(item.range),
-              ext_count: list.length(item.extensions),
-            ))
-          False -> Error(Nil)
-        }
-      False -> Error(Nil)
-    }
-  })
-  |> max_score
-}
-
-fn max_score(scores: List(MatchScore)) -> Option(MatchScore) {
-  case scores {
-    [] -> None
-    [head, ..rest] ->
-      Some(
-        list.fold(rest, head, fn(best, candidate) {
-          case better_score(candidate, best) {
-            True -> candidate
-            False -> best
-          }
-        }),
-      )
+  let scores =
+    list.filter_map(client, fn(item) {
+      case range_matches(item.range, offer_essence) {
+        True ->
+          Ok(MatchScore(
+            q: item.q,
+            specificity: specificity(item.range),
+            ext_count: list.length(item.extensions),
+          ))
+        False -> Error(Nil)
+      }
+    })
+  case list.reduce(scores, most_specific) {
+    Ok(score) ->
+      case score.q >. 0.0 {
+        True -> Some(score)
+        False -> None
+      }
+    Error(Nil) -> None
   }
 }
 
-fn better_score(a: MatchScore, b: MatchScore) -> Bool {
-  case float.compare(a.q, b.q) {
-    order.Gt -> True
-    order.Lt -> False
-    Eq ->
-      case int.compare(a.specificity, b.specificity) {
-        order.Gt -> True
-        order.Lt -> False
-        Eq ->
-          case int.compare(a.ext_count, b.ext_count) {
-            order.Gt -> True
-            _ -> False
-          }
-      }
+fn most_specific(a: MatchScore, b: MatchScore) -> MatchScore {
+  let cmp = {
+    use <- chain(int.compare(a.specificity, b.specificity))
+    use <- chain(int.compare(a.ext_count, b.ext_count))
+    float.compare(a.q, b.q)
+  }
+  case cmp {
+    order.Lt -> b
+    _ -> a
   }
 }
 

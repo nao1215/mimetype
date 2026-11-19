@@ -124,25 +124,41 @@ fn scan_utf8(bytes: BitArray, saw_multibyte: Bool, walked: Int) -> Utf8Verdict {
       if b1 >= 0xC3 && b1 <= 0xDF && b2 >= 0x80 && b2 <= 0xBF
     -> scan_utf8(rest, True, walked + 2)
     <<b1, b2, b3, rest:bits>>
-      if b1 >= 0xE0
-      && b1 <= 0xEF
-      && b2 >= 0x80
-      && b2 <= 0xBF
-      && b3 >= 0x80
-      && b3 <= 0xBF
-    -> scan_utf8(rest, True, walked + 3)
+      if b1 >= 0xE0 && b1 <= 0xEF && b3 >= 0x80 && b3 <= 0xBF
+    ->
+      case second_byte_ok(b1, b2) {
+        True -> scan_utf8(rest, True, walked + 3)
+        False -> UnknownEncoding
+      }
     <<b1, b2, b3, b4, rest:bits>>
       if b1 >= 0xF0
       && b1 <= 0xF4
-      && b2 >= 0x80
-      && b2 <= 0xBF
       && b3 >= 0x80
       && b3 <= 0xBF
       && b4 >= 0x80
       && b4 <= 0xBF
-    -> scan_utf8(rest, True, walked + 4)
+    ->
+      case second_byte_ok(b1, b2) {
+        True -> scan_utf8(rest, True, walked + 4)
+        False -> UnknownEncoding
+      }
     _ -> UnknownEncoding
   }
+}
+
+/// The allowed range of the second byte of a 3- or 4-byte sequence
+/// (Unicode Table 3-7, RFC 3629 section 4). The narrower ranges after
+/// E0, ED, F0 and F4 reject overlong forms, UTF-16 surrogates
+/// (U+D800-U+DFFF) and code points above U+10FFFF.
+fn second_byte_ok(lead: Int, second: Int) -> Bool {
+  let #(lo, hi) = case lead {
+    0xE0 -> #(0xA0, 0xBF)
+    0xED -> #(0x80, 0x9F)
+    0xF0 -> #(0x90, 0xBF)
+    0xF4 -> #(0x80, 0x8F)
+    _ -> #(0x80, 0xBF)
+  }
+  second >= lo && second <= hi
 }
 
 fn starts_with_xml_prolog(bytes: BitArray) -> Bool {

@@ -2494,6 +2494,38 @@ pub fn charset_of_invalid_utf8_returns_no_match_test() {
   |> should.equal(Error(mimetype.NoMatch))
 }
 
+pub fn charset_of_rejects_ill_formed_3_and_4_byte_sequences_test() {
+  // Unicode Table 3-7: overlong forms, UTF-16 surrogates and code points
+  // above U+10FFFF are not UTF-8 even though every byte is in the
+  // lead / continuation range.
+  [
+    <<0xE0, 0x80, 0x80>>,
+    <<0xE0, 0x9F, 0xBF>>,
+    <<0xED, 0xA0, 0x80>>,
+    <<0xED, 0xBF, 0xBF>>,
+    <<0xF0, 0x80, 0x80, 0x80>>,
+    <<0xF0, 0x8F, 0xBF, 0xBF>>,
+    <<0xF4, 0x90, 0x80, 0x80>>,
+    <<0xF4, 0xBF, 0xBF, 0xBF>>,
+  ]
+  |> list.each(fn(sequence) {
+    mimetype.charset_of(<<"x":utf8, sequence:bits>>)
+    |> should.equal(Error(mimetype.NoMatch))
+  })
+  // The first and last code points of each narrowed range stay valid.
+  [
+    <<0xE0, 0xA0, 0x80>>,
+    <<0xED, 0x9F, 0xBF>>,
+    <<0xEE, 0x80, 0x80>>,
+    <<0xF0, 0x90, 0x80, 0x80>>,
+    <<0xF4, 0x8F, 0xBF, 0xBF>>,
+  ]
+  |> list.each(fn(sequence) {
+    mimetype.charset_of(<<"x":utf8, sequence:bits>>)
+    |> should.equal(Ok("utf-8"))
+  })
+}
+
 pub fn charset_of_empty_returns_empty_input_test() {
   mimetype.charset_of(<<>>)
   |> should.equal(Error(mimetype.EmptyInput))

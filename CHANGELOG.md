@@ -6,6 +6,10 @@
 
 - GitHub Releases now attach the package tarball, `checksums.txt`, its cosign signature (`checksums.txt.sigstore.json`) and build provenance (`.intoto.jsonl`). See "Verifying releases" in the README.
 
+### Fixed
+
+- `accept.negotiate` and `accept.negotiate_strings` take an offer's q-value from the most specific matching media range, as RFC 9110 §12.5.1 requires. Before, the highest q among all matching ranges won, so `*/*, text/html;q=0` still selected text/html, and `text/*;q=0.3, */*;q=0.5` gave text/plain 0.5 instead of 0.3.
+
 ## [0.25.0] - 2026-09-10
 
 ### Changed

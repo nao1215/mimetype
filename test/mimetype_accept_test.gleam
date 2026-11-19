@@ -391,6 +391,35 @@ pub fn negotiate_specificity_wins_test() {
   |> should.equal(Some(mt("text/html")))
 }
 
+// RFC 9110 §12.5.1: when several media ranges match an offer, the most
+// specific one decides its q-value, so a broader range listed with a
+// higher q does not override it.
+pub fn negotiate_explicit_q_zero_overrides_wildcards_test() {
+  let assert Ok(items) = accept.parse("*/*, text/html;q=0")
+  accept.negotiate(client_accepts: items, server_offers: [mt("text/html")])
+  |> should.equal(None)
+
+  let assert Ok(items) =
+    accept.parse("*/*;q=0.5, application/json;q=0, application/*")
+  accept.negotiate(client_accepts: items, server_offers: [
+    mt("text/html"),
+    mt("application/json"),
+    mt("application/xml"),
+  ])
+  |> should.equal(Some(mt("application/xml")))
+}
+
+pub fn negotiate_most_specific_range_sets_the_q_value_test() {
+  // text/plain gets 0.3 from text/*, not 0.5 from */*, so json wins.
+  let assert Ok(items) =
+    accept.parse("text/*;q=0.3, */*;q=0.5, application/json;q=0.4")
+  accept.negotiate(client_accepts: items, server_offers: [
+    mt("text/plain"),
+    mt("application/json"),
+  ])
+  |> should.equal(Some(mt("application/json")))
+}
+
 // ---------------------------------------------------------------------------
 // 8. encoding / charset / language
 // ---------------------------------------------------------------------------

@@ -184,7 +184,7 @@ parameter-level matching is out of scope.
 `detect/1` recognises the following MIME types from byte-level
 signatures or structural sniffs near the start of the input. This
 list is generated from `src/mimetype/internal/magic.gleam` by
-`scripts/generate_supported_formats.sh` — do not edit it by hand;
+`scripts/generate_supported_formats.sh`. Do not edit it by hand;
 re-run `just generate-readme` after adding or removing a signature.
 
 ### Application formats

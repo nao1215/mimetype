@@ -10,13 +10,11 @@
 [![License](https://img.shields.io/github/license/nao1215/mimetype)](./LICENSE)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/nao1215/mimetype/badge)](https://scorecard.dev/viewer/?uri=github.com/nao1215/mimetype)
 
-MIME type lookup and magic-number detection for Gleam on Erlang and JavaScript targets.
-
-## Features
-
-- Extension-to-MIME and MIME-to-extensions lookup derived from `mime-db`
-- Magic-number detection for common binary formats across archive, document, image, audio, and video families
-- Pure Gleam implementation that builds on both targets
+MIME type lookup and magic-number detection for Gleam on Erlang and
+JavaScript. Pure Gleam; the extension table is generated from
+[`jshttp/mime-db`](https://github.com/jshttp/mime-db), which tracks the
+IANA registry and common aliases. The full API is on
+[HexDocs](https://hexdocs.pm/mimetype/).
 
 ## Install
 
@@ -24,32 +22,14 @@ MIME type lookup and magic-number detection for Gleam on Erlang and JavaScript t
 gleam add mimetype
 ```
 
-## When to use this
+## Lookup by filename or extension
 
-Use `mimetype` when you need a small, cross-target MIME utility in
-Gleam:
-
-- Serving files or attachments: resolve `Content-Type` from a filename or extension
-- Validating uploads: prefer magic-number detection over user-supplied extensions
-- Bridging APIs: map between file extensions and MIME types in both directions
-
-The extension database is generated from `jshttp/mime-db`, which tracks
-the IANA media type registry and common ecosystem aliases. Refreshing
-the generated table keeps lookups aligned with that upstream source.
-
-## Serving a file: pick a Content-Type from a filename
-
-The most common use is reading the filename your handler already has,
-turning it into a wire-ready `Content-Type` value. `filename_to_mime_type`
-is case-insensitive and falls back to `application/octet-stream` for
-unknown extensions, so the helper is safe to drop into a response path
-without extra branching.
+`filename_to_mime_type` ignores case and falls back to
+`application/octet-stream`, so it can go straight into a response path:
 
 ```gleam
 import mimetype
 
-/// Pick the Content-Type header value to send back when serving
-/// `filename` from disk or object storage.
 pub fn content_type_for(filename: String) -> String {
   mimetype.filename_to_mime_type(filename)
   |> mimetype.to_string
@@ -61,73 +41,12 @@ pub fn content_type_for(filename: String) -> String {
 // content_type_for("notes")         -> "application/octet-stream"
 ```
 
-For HTML / CSS / JS responses where browsers expect a charset, parse
-the wire string once and append the parameter you actually serve:
-
-```gleam
-import gleam/option.{Some}
-import mimetype
-
-pub fn html_content_type() -> String {
-  let assert Ok(html) = mimetype.parse("text/html; charset=utf-8")
-  mimetype.to_string(html)
-  // -> "text/html; charset=utf-8"
-}
-```
-
-## Validating an upload: detect from bytes, not the user's extension
-
-Browser-uploaded filenames are user input and can lie. Match the leading
-bytes of the upload against `mimetype.detect` to get the actual format,
-then enforce an allowlist of MIME types your endpoint will accept.
-
-```gleam
-import mimetype
-
-pub type UploadError {
-  EmptyUpload
-  Unsupported(detected: String)
-}
-
-/// Allow only PNG, JPEG, and WebP uploads. The detected MIME type is
-/// derived from magic bytes — the caller's filename is ignored.
-pub fn validate_image_upload(
-  bytes: BitArray,
-) -> Result(mimetype.MimeType, UploadError) {
-  case mimetype.detect_strict(bytes) {
-    Ok(mime) ->
-      case mimetype.is_image(mime) && image_is_allowed(mime) {
-        True -> Ok(mime)
-        False -> Error(Unsupported(detected: mimetype.to_string(mime)))
-      }
-    Error(mimetype.EmptyInput) -> Error(EmptyUpload)
-    Error(_) -> Error(Unsupported(detected: "application/octet-stream"))
-  }
-}
-
-fn image_is_allowed(mime: mimetype.MimeType) -> Bool {
-  case mimetype.essence_of(mime) {
-    "image/png" | "image/jpeg" | "image/webp" -> True
-    _ -> False
-  }
-}
-```
-
-The strict variant separates `EmptyInput` (zero-byte upload) from
-`NoMatch` (bytes that did not match any signature) so the caller can
-return the right HTTP status. For a non-throwing path, `mimetype.detect`
-returns `application/octet-stream` for both cases instead.
-
-## Other API entry points
-
-The full surface returns an opaque `MimeType`. Use `mimetype.to_string`
-to serialise for an HTTP header; use `mimetype.parse` to construct one
-from a wire-format string. Inspect with `essence_of`, `parameter_of`,
-`charset_of_type`, `is_image`, `is_a`, and the rest of the predicate /
-accessor family. The `parameter_of` docstring pins the rules for
-duplicate names (first wins), case-insensitive lookup, and value
-whitespace handling — consult it before building anything that round-
-trips parameters.
+Every call returns an opaque `MimeType`. `mimetype.parse` builds one from
+a wire string and `mimetype.to_string` serialises it; `essence_of`,
+`parameter_of`, `charset_of_type`, `is_image`, `is_a` and the other
+accessors inspect it. The `parameter_of` doc comment gives the rules for
+duplicate names (first wins), case-insensitive lookup and whitespace in
+values.
 
 ```gleam
 import gleam/option.{Some}
@@ -152,86 +71,52 @@ pub fn main() {
 }
 ```
 
-## Capabilities and limitations
+## Detect an upload from its bytes
 
-This library intentionally stays focused. Knowing where the detector
-stops is more useful than discovering it from a surprising result:
-
-- It does perform shallow ZIP-container inspection for a small fixed allowlist: `epub`, OOXML (`docx`/`xlsx`/`pptx`), OpenDocument (`odt`/`ods`/`odp`), `jar`, and `apk`. It does not recurse arbitrarily into nested containers or inspect embedded subformats beyond those targeted signatures.
-- It does sniff `text/plain` from printable-ASCII-only payloads (the bounded WHATWG-style binary-vs-text heuristic added in #20) and recognises the UTF-8/16/32 BOM signatures, returning `text/plain; charset=<utf-X>` for the BOM cases. This is the **only** text-related sniffing — it does not detect text encodings beyond the BOM marker, and the printable-ASCII fallback emits a bare `text/plain` with no charset parameter.
-- Beyond the four BOM-derived `text/plain; charset=utf-*` signatures it does not parse, validate, or surface MIME-parameter values from the wire.
-
-## Content negotiation
-
-`mimetype/accept` parses RFC 9110 §12.5 `Accept`-family headers and
-picks the best server offer for a given client header.
+Uploaded filenames are user input. `detect_strict` checks the leading
+bytes instead, and its error separates `EmptyInput` (zero bytes) from
+`NoMatch` (no signature matched) so you can pick the HTTP status.
+`detect` returns `application/octet-stream` in both cases.
 
 ```gleam
 import mimetype
-import mimetype/accept
 
-pub fn main() {
-  let assert Ok(items) = accept.parse("text/html, application/json;q=0.9")
-  let assert Ok(html) = mimetype.parse("text/html")
-  let assert Ok(json) = mimetype.parse("application/json")
-  accept.negotiate(client_accepts: items, server_offers: [json, html])
-  // -> Some(html)
+pub type UploadError {
+  EmptyUpload
+  Unsupported(detected: String)
+}
+
+/// Allow only PNG, JPEG, and WebP uploads, judged by magic bytes.
+pub fn validate_image_upload(
+  bytes: BitArray,
+) -> Result(mimetype.MimeType, UploadError) {
+  case mimetype.detect_strict(bytes) {
+    Ok(mime) ->
+      case mimetype.is_image(mime) && image_is_allowed(mime) {
+        True -> Ok(mime)
+        False -> Error(Unsupported(detected: mimetype.to_string(mime)))
+      }
+    Error(mimetype.EmptyInput) -> Error(EmptyUpload)
+    Error(_) -> Error(Unsupported(detected: "application/octet-stream"))
+  }
+}
+
+fn image_is_allowed(mime: mimetype.MimeType) -> Bool {
+  case mimetype.essence_of(mime) {
+    "image/png" | "image/jpeg" | "image/webp" -> True
+    _ -> False
+  }
 }
 ```
 
-The same module handles `Accept-Encoding`, `Accept-Charset`, and
-`Accept-Language`:
+### Reading only a prefix
 
-```gleam
-import mimetype/accept
-
-pub fn main() {
-  let assert Ok(items) =
-    accept.parse_encoding("gzip, br;q=1.0, *;q=0.1")
-  accept.negotiate_value(client_accepts: items, server_offers: ["br", "gzip"])
-  // -> Some("br")
-}
-```
-
-Notes:
-- `q=0` excludes a media range from consideration.
-- A bare `*/*` client header returns the server's first offer
-  (server preference).
-- `Specific(MimeType)` matching is essence-only — RFC §12.5.1
-  parameter-level "more-specific" matching is currently out of scope.
-
-## Reader-based detection
-
-`detect_reader` and `detect_reader_strict` let callers detect a MIME
-type **without buffering the whole input**. They take a synchronous
-reader plus a byte budget, and the reader is invoked **at most once**
-to fetch up to that many bytes from the start of the source.
-
-### Reader contract
-
-```gleam
-pub type Reader(read_error) = fn(Int) -> Result(BitArray, read_error)
-```
-
-- The `Int` argument is the maximum number of bytes the detector wants.
-- Returning fewer bytes than requested is fine — it is interpreted as
-  "the source ended early". Detection runs against whatever was
-  returned.
-- The returned `BitArray` should always be the prefix starting at
-  offset 0 of the source. The detector inspects it from byte 0.
-- The error parameter `read_error` is opaque to the library; in the
-  strict variant it is preserved as `ReaderError(read_error)` so
-  callers can distinguish IO failures from "no signature matched".
-
-The reader is called **once per detection call**. There is no
-streaming or back-and-forth — return enough bytes for the largest
-signature you care about (the detector inspects up to a few KB by
-default), or pass a custom `limit` argument tuned for your workload.
-
-### In-memory adapter
-
-The simplest case: when the bytes are already in hand, wrap them in a
-function that ignores its argument.
+`detect_reader` and `detect_reader_strict` take a synchronous
+`Reader(read_error) = fn(Int) -> Result(BitArray, read_error)` and a
+byte budget. The reader is called once and should return up to that
+many bytes from offset 0; a shorter result means the source ended. The
+strict variant keeps a reader failure as `ReaderError(e)`, apart from
+`EmptyInput` and `NoMatch`.
 
 ```gleam
 import mimetype
@@ -246,86 +131,52 @@ pub fn main() {
 }
 ```
 
-### BEAM file prefix reader
+On BEAM, wrap a file read of the first `limit` bytes. Browser `Blob` and
+`ReadableStream` reads are asynchronous and cannot satisfy `Reader`, so
+await `blob.slice(0, 3072).arrayBuffer()` yourself and pass the bytes to
+`detect` or `detect_strict`.
 
-On the Erlang target, wrap a file-IO library so that one call returns
-up to `limit` bytes from the start of the file. Any IO library that
-can open a file and read a fixed-size prefix works — the snippet below
-sketches the shape using a `read_prefix(path, limit)` helper that
-returns `Result(BitArray, your_error)`:
+### What detection does not do
 
-```gleam
-import mimetype
+- ZIP containers are inspected shallowly, only for `epub`, OOXML (`docx`/`xlsx`/`pptx`), OpenDocument (`odt`/`ods`/`odp`), `jar` and `apk`. Nested containers are not opened.
+- Text sniffing is limited to the UTF-8/16/32 BOMs, which give `text/plain; charset=<utf-X>`, and a printable-ASCII check (the bounded WHATWG-style heuristic from #20), which gives bare `text/plain`. No other encoding is detected.
+- Apart from those four BOM-derived charsets, detection does not parse or report MIME parameters.
 
-pub fn detect_file(path: String) -> Result(mimetype.MimeType, mimetype.DetectionError(your_error)) {
-  let reader = fn(limit) { read_prefix(path, limit) }
-  mimetype.detect_reader_strict(reader, 3072)
-}
-```
+## Content negotiation
 
-If `read_prefix` returns `Ok(<<>>)` for an empty file, the strict
-variant surfaces `Error(EmptyInput)`. If `read_prefix` itself returns
-`Error(some_io_error)`, the strict variant surfaces
-`Error(ReaderError(some_io_error))` so the caller can distinguish IO
-failure from a genuine no-match.
-
-### JavaScript browser adapter
-
-In the browser, `File` / `Blob` / `ReadableStream` reads are
-asynchronous, so they cannot satisfy the synchronous `Reader`
-contract directly. The intended pattern is:
-
-1. Read the prefix asynchronously (`await blob.slice(0, limit).arrayBuffer()`
-   or the equivalent on a `ReadableStream`).
-2. Pass the resulting bytes to `detect` / `detect_strict`, **not** to
-   `detect_reader`.
-
-In Gleam pseudo-code, with an FFI helper `read_blob_prefix` that
-awaits the slice and returns a `BitArray`:
+`mimetype/accept` parses RFC 9110 §12.5 `Accept`-family headers and
+picks the best server offer.
 
 ```gleam
 import mimetype
+import mimetype/accept
 
-pub fn detect_blob(blob: Blob) -> mimetype.MimeType {
-  // `read_blob_prefix` is your FFI: await blob.slice(0, 3072).arrayBuffer()
-  let bytes = read_blob_prefix(blob, 3072)
-  mimetype.detect(bytes)
+pub fn main() {
+  let assert Ok(items) = accept.parse("text/html, application/json;q=0.9")
+  let assert Ok(html) = mimetype.parse("text/html")
+  let assert Ok(json) = mimetype.parse("application/json")
+  accept.negotiate(client_accepts: items, server_offers: [json, html])
+  // -> Some(html)
 }
 ```
 
-The reader-based API is most useful when the source is itself
-synchronous (BEAM file IO, in-memory buffers, deterministic stream
-adapters). For Promise-based sources, awaiting the prefix once and
-calling `detect` is the recommended shape.
-
-### Strict variants and error handling
-
-The strict variants return `Result(MimeType, DetectionError(read_error))`,
-where `DetectionError` distinguishes:
-
-- `EmptyInput` — the reader returned a zero-byte payload, so no
-  detection was possible.
-- `NoMatch` — the reader returned bytes, but no signature and no
-  printable-ASCII fallback applied.
-- `ReaderError(e)` — the reader itself failed; `e` is preserved
-  unchanged.
-- `UnknownExtension(_)` — only emitted by extension/filename helpers,
-  not the reader API.
+`Accept-Encoding`, `Accept-Charset` and `Accept-Language` work the same
+way:
 
 ```gleam
-import gleam/io
-import mimetype
+import mimetype/accept
 
-pub fn classify(reader) {
-  case mimetype.detect_reader_strict(reader, 3072) {
-    Ok(mime) -> io.println(mimetype.to_string(mime))
-    Error(mimetype.EmptyInput) -> io.println("empty source")
-    Error(mimetype.NoMatch) -> io.println("unrecognised content")
-    Error(mimetype.ReaderError(reason)) -> io.debug(reason)
-    Error(mimetype.UnknownExtension(_)) -> Nil
-  }
+pub fn main() {
+  let assert Ok(items) =
+    accept.parse_encoding("gzip, br;q=1.0, *;q=0.1")
+  accept.negotiate_value(client_accepts: items, server_offers: ["br", "gzip"])
+  // -> Some("br")
 }
 ```
+
+`q=0` excludes a range. A bare `*/*` returns the server's first offer.
+`Specific(MimeType)` matches on the essence only; RFC §12.5.1
+parameter-level matching is out of scope.
 
 ## Supported magic-number formats
 
@@ -441,10 +292,8 @@ re-run `just generate-readme` after adding or removing a signature.
 - `video/x-msvideo`
 <!-- END_SUPPORTED_FORMATS -->
 
-The detector is intentionally shallow: it looks only at fixed
-signatures near the start of the byte stream, plus a small amount of
-targeted ZIP local-header inspection for the container formats listed
-above. It does not recurse arbitrarily into nested containers.
+The detector only checks fixed signatures near the start of the input,
+plus ZIP local headers for the containers listed above.
 
 ## Development
 
@@ -463,13 +312,12 @@ The generated MIME-DB lookup tables live in
 just generate-db
 ```
 
-CI runs the same generator against the pinned upstream commit and fails
-the build if the regenerated output drifts from the committed copies.
+CI runs the generator against the pinned upstream commit and fails if
+the output differs from the committed files.
 
 ### Benchmarks
 
-The hot lookup and detection paths have a small reproducible bench
-harness under `test/mimetype_bench.gleam`. Run it on either target:
+`test/mimetype_bench.gleam` times the lookup and detection paths:
 
 ```sh
 just bench-erlang
@@ -477,13 +325,9 @@ just bench-javascript
 just bench            # both, in sequence
 ```
 
-Each run prints a Markdown table of `ns/op` figures. Capture a
-baseline from `main` before a refactor
-(`just bench-erlang > before.md`), then re-run on the working branch
-and diff the two tables to check for material regressions. The
-harness is intentionally not wired into PR-time CI gates — it is for
-local A/B comparison and ad-hoc investigation, not for blocking
-merges on micro-fluctuations.
+Each run prints a Markdown table of `ns/op`. Save a baseline from
+`main` (`just bench-erlang > before.md`), rerun on your branch and diff
+the tables. CI does not run the benchmarks.
 
 ## Testing
 

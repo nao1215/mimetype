@@ -536,17 +536,12 @@ fn json_number(bytes: BitArray, first: Bool) -> Json {
   }
 }
 
-// The input ended, or goes on with the rest of `literal`.
+// The input ends partway through `literal`. A complete literal was
+// matched before this is called.
 fn json_literal_prefix(bytes: BitArray, literal: BitArray) -> Json {
-  let size = bit_array.byte_size(bytes)
-  case size < bit_array.byte_size(literal) {
-    True ->
-      case bit_array.slice(literal, 0, size) == Ok(bytes) {
-        True -> Truncated
-        False -> Invalid
-      }
-    False -> Invalid
-  }
+  let prefix = bit_array.slice(literal, 0, bit_array.byte_size(bytes))
+  use <- bool.guard(when: prefix != Ok(bytes), return: Invalid)
+  Truncated
 }
 
 // ---------------------------------------------------------------------------

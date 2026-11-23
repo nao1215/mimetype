@@ -67,8 +67,6 @@ cat > "$tmp_gleam" <<EOF
 // Regenerate with: bash scripts/generate_mime_db.sh
 // See THIRD_PARTY_NOTICES.md for the packaged notice text.
 
-pub const default_mime_type = "application/octet-stream"
-
 // The MIME-DB data tables themselves live in the FFI source files
 // (mimetype_db_ffi.erl and db_ffi.mjs); see THIRD_PARTY_NOTICES.md for the
 // licensing notice that applies to that data.

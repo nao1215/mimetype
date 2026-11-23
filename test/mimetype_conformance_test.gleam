@@ -396,3 +396,13 @@ pub fn deeply_nested_json_test() {
   let objects = bit_array.from_string(string.repeat("{\"a\":", 700))
   assert detected(objects) == Ok("application/json")
 }
+
+// ISO/IEC 15444-1 and 18181-2: the 12-byte signature box ends with
+// 0D 0A 87 0A, so 8 bytes are not enough.
+pub fn jpeg2000_signature_box_needs_all_twelve_bytes_test() {
+  let box = <<0x0D, 0x0A, 0x87, 0x0A>>
+  assert detected(<<0, 0, 0, 0x0C, "jP  ":utf8, box:bits>>) == Ok("image/jp2")
+  assert detected(<<0, 0, 0, 0x0C, "JXL ":utf8, box:bits>>) == Ok("image/jxl")
+  assert detected(<<0, 0, 0, 0x0C, "jP  ":utf8>>) == Error(Nil)
+  assert detected(<<0, 0, 0, 0x0C, "JXL ":utf8, 0, 0, 0, 0>>) == Error(Nil)
+}

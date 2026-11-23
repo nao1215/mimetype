@@ -695,7 +695,6 @@ pub fn extension_and_mime_mapping_roundtrip_test() {
 
     assert mimetype.mime_type_to_extensions(mime_type)
       |> list.contains(extension)
-      == True
   })
 }
 
@@ -2054,12 +2053,11 @@ pub fn is_a_reflexive_test() {
 
 pub fn is_a_docx_inherits_from_zip_test() {
   assert mimetype.is_a(
-      mt(
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      ),
-      mt("application/zip"),
-    )
-    == True
+    mt(
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ),
+    mt("application/zip"),
+  )
 }
 
 pub fn is_a_svg_inherits_from_xml_test() {
@@ -2074,10 +2072,9 @@ pub fn is_a_unrelated_returns_false_test() {
 pub fn is_a_normalizes_essence_test() {
   // Parameters and case differences are stripped before comparison.
   assert mimetype.is_a(
-      mt("APPLICATION/ZIP; charset=utf-8"),
-      mt("application/zip"),
-    )
-    == True
+    mt("APPLICATION/ZIP; charset=utf-8"),
+    mt("application/zip"),
+  )
 }
 
 pub fn is_zip_based_apk_test() {
@@ -2143,40 +2140,33 @@ pub fn is_xml_based_arbitrary_plus_xml_test() {
 
 pub fn is_a_xhtml_is_application_xml_test() {
   assert mimetype.is_a(mt("application/xhtml+xml"), mt("application/xml"))
-    == True
 }
 
 pub fn is_a_atom_is_application_xml_test() {
   assert mimetype.is_a(mt("application/atom+xml"), mt("application/xml"))
-    == True
 }
 
 pub fn is_a_ld_json_is_application_json_test() {
   assert mimetype.is_a(mt("application/ld+json"), mt("application/json"))
-    == True
 }
 
 pub fn is_a_hal_json_is_application_json_test() {
   assert mimetype.is_a(mt("application/hal+json"), mt("application/json"))
-    == True
 }
 
 pub fn is_a_unknown_plus_zip_is_application_zip_test() {
   // `+zip` is one of the four RFC 6839 suffixes — an unregistered
   // `application/x-custom+zip` is still a ZIP container.
   assert mimetype.is_a(mt("application/x-custom+zip"), mt("application/zip"))
-    == True
 }
 
 pub fn is_a_unknown_plus_cbor_is_application_cbor_test() {
   assert mimetype.is_a(mt("application/x-custom+cbor"), mt("application/cbor"))
-    == True
 }
 
 pub fn is_a_suffix_does_not_cross_to_other_parent_test() {
   // `+json` does not imply `application/xml`, etc.
-  assert mimetype.is_a(mt("application/ld+json"), mt("application/xml"))
-    == False
+  assert !mimetype.is_a(mt("application/ld+json"), mt("application/xml"))
 }
 
 pub fn ancestors_xhtml_plus_xml_test() {

@@ -2,6 +2,51 @@
 
 ## [Unreleased]
 
+### Removed
+
+- `mimetype.is_zip_based` and `mimetype.is_xml_based`. Use `mimetype.is_a` with `application/zip` or `application/xml`. `text/xml` is now a kind of `application/xml` (RFC 7303 defines it as an alias), so one check covers both.
+- The `extensions` field of `accept.AcceptItem`. RFC 9110 removed the accept-ext grammar; parameters after `q` now belong to the media range.
+
+Before:
+
+```gleam
+mimetype.is_xml_based(mime)
+```
+
+After:
+
+```gleam
+let assert Ok(xml) = mimetype.parse("application/xml")
+mimetype.is_a(mime, xml)
+```
+
+### Changed
+
+Detection, extension lookup, `detect_charset` and the `Accept` negotiation were compared with Go's `gabriel-vasile/mimetype`, libmagic (`file --mime-type`) and Python's `mimetypes`, and each difference was settled against the format specification or the IANA registry.
+
+- `detect` reports `text/plain` for any input without a signature that holds no binary data byte (0x00 to 0x08, 0x0B, 0x0E to 0x1A, 0x1C to 0x1F), as WHATWG MIME Sniffing defines it. UTF-8 and Latin-1 text used to give `Error(Nil)`. The check now reads all 3072 bytes instead of the first 1024, so a NUL byte at position 1500 rules out text.
+- `detect` returns the IANA-registered type where one exists, which is also what the extension table returns: `application/zlib` (was `application/x-deflate`), `image/vnd.microsoft.icon` for icons (cursors stay `image/x-icon`), `application/vnd.rar` (was `application/x-rar-compressed`), `application/xml` for `<?xml` (was `text/xml`) and `video/matroska` (was `video/x-matroska`, RFC 9559). AIFF is `audio/x-aiff`, as in the extension table, since no AIFF type is registered.
+- `extension_to_mime_type` returns `audio/flac` for `flac` (RFC 9639), `video/matroska` for `mkv`, `application/yaml` for `yaml` and `yml` (RFC 9512), `application/vnd.debian.binary-package` for `deb` and `udeb` (was `application/octet-stream`), `application/vnd.ms-asf` for `asf`, and `audio/wav` for `wav`, the type detection reports.
+- `mime_type_to_extensions` knows an extension for every type detection reports except `application/x-elf`, `application/x-ole-storage` and `application/zlib`, which have none: `zst`, `ac3`, `awb`, `hdr`, `z`, `a`, `lz4`, `lz`, `sz`, `qoi`, `exr`, `asf`, `flac` and `deb` are new.
+- ISO base media files: the `hevc` and `hevx` brands are `image/heic-sequence` (was `image/heic`), `mif1` is `image/heif`, `msf1` is `image/heif-sequence`, the 3GPP brands are `video/3gpp` and `video/3gpp2`, and `NDAS`, `F4A ` and `F4B ` are `audio/mp4`. All of these used to fall through to `video/mp4`.
+- `accept.negotiate` matches media range parameters (RFC 9110 section 12.5.1): `text/html;level=1` matches only offers with `level=1` and takes precedence over `text/html`, and `prefer` orders `text/plain;format=flowed` before `text/plain`. `charset` values are compared without regard to case.
+- `accept.negotiate_value` matches a range to a tag that starts with it and `-` (RFC 4647 basic filtering, so `en` matches `en-US`), with the longest matching range deciding. `identity` is acceptable unless `identity;q=0` or `*;q=0` rules it out, and an empty header picks `identity` when it is offered (RFC 9110 section 12.5.3).
+- `accept.parse_values` puts the failing entry in `InvalidQValue`, as `parse` does, instead of the whole header.
+
+### Added
+
+- `application/postscript` (`%!PS-Adobe-`) is detected.
+
+### Fixed
+
+- `accept.parse` and `accept.parse_values` reject a sign in the fraction of a q-value. `q=0.-1` used to give a quality of -0.01 and `q=0.+5` 0.05.
+- `detect` no longer reports JSON for a JSON value followed by text, such as `[1] first item`.
+- `detect` recognises `<!--` and `<b` as HTML, as WHATWG MIME Sniffing lists them, and requires a tag-terminating byte after each HTML pattern, so the two bytes `<a` are text.
+- `detect` no longer reports `image/bmp` for text starting with `BM`, `application/vnd.ms-cab-compressed` for text starting with `MSCF`, or `audio/mpeg` for text starting with `ID3`. The reserved fields of the BMP and CAB headers and the ID3v2 version byte are checked.
+- `detect_charset` finds the XML `encoding` and the `<meta>` charset in documents that are not UTF-8, such as Shift_JIS or Latin-1, which is when the declaration matters. It used to give up when the first 1024 bytes were not valid UTF-8, including when the 1024th byte fell inside a UTF-8 character.
+- `detect_charset` ignores an empty declared charset (it returned `Ok("")`) and a `charset=` outside a `<meta>` tag.
+- `detect_charset` scans 3072 bytes, as `detect` reads, instead of 1024, and accepts a UTF-8 character that the limit cuts in two. Input with a binary data byte, such as UTF-16 without a byte order mark, gives `Error(Nil)` instead of `us-ascii`.
+
 ## [0.27.0] - 2026-11-23
 
 ### Changed

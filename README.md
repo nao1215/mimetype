@@ -83,9 +83,10 @@ The API reference is on [HexDocs](https://hexdocs.pm/mimetype/), and the detecte
 ## Notes
 
 - Inside a ZIP archive, detection reads only the entry names near the start of the file, which is enough for docx, xlsx, pptx, odt, ods, odp, epub, jar and apk. Archives inside archives are not opened.
-- Printable ASCII without a signature is reported as `text/plain`. UTF-8 text without a byte order mark matches no signature, so `detect` returns `Error(Nil)` for it; use `detect_with_filename` or `detect_charset` for such files.
+- Bytes without a signature are reported as `text/plain` unless they hold a binary data byte (a control byte other than tab, LF, FF, CR and ESC), as in WHATWG MIME Sniffing. This covers UTF-8 and Latin-1 text; `detect_charset` tells them apart.
 - `detect_charset` reads a byte order mark, an XML declaration, an HTML `<meta charset>` or, failing those, checks for valid UTF-8. It does not guess other encodings such as Latin-1.
-- `accept.negotiate` compares `type/subtype` only. Parameters on media ranges are ignored.
+- `accept.negotiate` follows RFC 9110 section 12.5.1: a media range with parameters, such as `text/html;level=1`, matches only offers with those parameters and takes precedence over `text/html`. Parameters on `type/*` and `*/*` are ignored.
+- `accept.negotiate_value` matches `en` to `en-US` (RFC 4647 basic filtering) and treats `identity` as acceptable unless the header rules it out (RFC 9110 section 12.5.3).
 
 How the package is tested is described in [doc/testing.md](https://github.com/nao1215/mimetype/blob/main/doc/testing.md).
 

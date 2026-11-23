@@ -49,8 +49,22 @@ const signatures = [
   Bytes("image/x-icon", [#(0, <<0x00, 0x00, 0x02, 0x00>>)]),
   Bytes("image/vnd.adobe.photoshop", [#(0, <<"8BPS":utf8>>)]),
   // JPEG 2000 and the JPEG XL container start with a 12-byte signature box.
-  Bytes("image/jp2", [#(0, jpeg2000_box_size), #(4, <<"jP  ":utf8>>)]),
-  Bytes("image/jxl", [#(0, jpeg2000_box_size), #(4, <<"JXL ":utf8>>)]),
+  Bytes(
+    "image/jp2",
+    [
+      #(0, signature_box_size),
+      #(4, <<"jP  ":utf8>>),
+      #(8, signature_box_content),
+    ],
+  ),
+  Bytes(
+    "image/jxl",
+    [
+      #(0, signature_box_size),
+      #(4, <<"JXL ":utf8>>),
+      #(8, signature_box_content),
+    ],
+  ),
   Bytes("image/jxl", [#(0, <<0xFF, 0x0A>>)]),
   Bytes("image/vnd.ms-dds", [#(0, <<"DDS ":utf8>>)]),
   Bytes("image/vnd.radiance", [#(0, <<"#?RADIANCE":utf8, 0x0A>>)]),
@@ -207,7 +221,9 @@ const signatures = [
   Bytes("text/plain; charset=utf-8", [#(0, <<0xEF, 0xBB, 0xBF>>)]),
 ]
 
-const jpeg2000_box_size = <<0x00, 0x00, 0x00, 0x0C>>
+const signature_box_size = <<0x00, 0x00, 0x00, 0x0C>>
+
+const signature_box_content = <<0x0D, 0x0A, 0x87, 0x0A>>
 
 const zip_local_header = <<"PK":utf8, 0x03, 0x04>>
 

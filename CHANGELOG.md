@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-11-23
+
 ### Removed
 
 - `mimetype.is_zip_based` and `mimetype.is_xml_based`. Use `mimetype.is_a` with `application/zip` or `application/xml`. `text/xml` is now a kind of `application/xml` (RFC 7303 defines it as an alias), so one check covers both. `is_a(mime, text/xml)` is now `False` for `image/svg+xml` and the other `+xml` types, which are kinds of `application/xml`.

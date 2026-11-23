@@ -2,6 +2,45 @@
 
 ## [Unreleased]
 
+### Changed
+
+The public API is smaller: every lookup and detection function now returns a `Result`, and the lenient copy of each function is gone. `mimetype` goes from 33 functions to 22 and `mimetype/accept` from 12 to 5.
+
+- `detect`, `detect_signature_only`, `detect_with_extension`, `detect_with_filename`, `extension_to_mime_type` and `filename_to_mime_type` return `Result(MimeType, Nil)`. They take the behaviour of the old `_strict` functions, which are removed. For the old fallback, use `result.unwrap(mimetype.octet_stream)`.
+- `mime_type_to_extensions` still returns `List(String)`, `[]` for an unknown type. `mime_type_to_extensions_strict` is removed.
+- `DetectionError`, `SimpleDetectionError` and `Reader` are removed. A failed lookup or detection is `Error(Nil)`; check `bytes == <<>>` to tell empty input apart.
+- `detect_with_limit`, `detect_with_limit_strict`, `detect_signature_only_with_limit`, `detect_reader`, `detect_reader_strict` and `default_detection_limit` are removed. Detection always reads up to the first 3072 bytes. To detect from a reader, read the bytes and pass them to `detect`.
+- Renamed: `essence_of` to `essence`, `parameter_of` to `parameter`, `charset_of_type` to `charset`, `charset_of` to `detect_charset`, and `default_mime_type` to `octet_stream`.
+- `parameter`, `charset` and `detect_charset` return `Result(String, Nil)` instead of `Option(String)` or `Result(String, DetectionError(Nil))`.
+- `accept.negotiate` and `accept.negotiate_value` return `Result(_, Nil)` instead of `Option(_)`, and their arguments are no longer labelled.
+- `accept.parse_encoding`, `accept.parse_charset` and `accept.parse_language` are replaced by `accept.parse_values`.
+- `accept.negotiate_strings`, `negotiate_encoding_strings`, `negotiate_charset_strings`, `negotiate_language_strings`, `NegotiateError` and `prefer_values` are removed. Parse the header and the offers, then call `negotiate`.
+- The `q` field of `accept.AcceptItem` and `accept.ValueItem` is renamed `quality`.
+- `accept.AcceptError` loses the `Malformed` variant, which no input produced, and `InvalidQValue` holds the entry without its surrounding whitespace.
+- The supported-format list moved from the README to the "Supported formats" page on HexDocs.
+
+multipartkit uses `filename_to_mime_type_strict`, `detect_strict` and `essence_of`, and needs updating for this release.
+
+Before:
+
+```gleam
+case mimetype.detect_strict(bytes) {
+  Ok(mime) -> mimetype.essence_of(mime)
+  Error(mimetype.EmptyInput) -> "empty"
+  Error(_) -> mimetype.to_string(mimetype.detect(bytes))
+}
+```
+
+After:
+
+```gleam
+case bytes, mimetype.detect(bytes) {
+  <<>>, _ -> "empty"
+  _, Ok(mime) -> mimetype.essence(mime)
+  _, Error(Nil) -> mimetype.to_string(mimetype.octet_stream)
+}
+```
+
 ## [0.26.0] - 2026-11-19
 
 ### Added

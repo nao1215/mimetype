@@ -10,6 +10,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
+import mimetype/internal/charset
 
 type Signature {
   Bytes(String, List(#(Int, BitArray)))
@@ -365,7 +366,7 @@ fn looks_like_rtf(bytes: BitArray) -> Bool {
 }
 
 fn looks_like_json(bytes: BitArray) -> Bool {
-  let stripped = strip_utf8_bom(bytes)
+  let stripped = charset.strip_utf8_bom(bytes)
   let #(after_ws, budget) = json_skip_ws(stripped, json_sniff_budget)
   case after_ws {
     <<0x7B, rest:bits>> ->
@@ -606,26 +607,8 @@ fn matches_html_tag(bytes: BitArray, tag: BitArray) -> Bool {
 
 fn trim_text_prefix(bytes: BitArray) -> BitArray {
   bytes
-  |> strip_utf8_bom
-  |> skip_html_ws
-}
-
-fn strip_utf8_bom(bytes: BitArray) -> BitArray {
-  case bytes {
-    <<0xEF, 0xBB, 0xBF, rest:bits>> -> rest
-    _ -> bytes
-  }
-}
-
-fn skip_html_ws(bytes: BitArray) -> BitArray {
-  case bytes {
-    <<0x20, rest:bits>> -> skip_html_ws(rest)
-    <<0x09, rest:bits>> -> skip_html_ws(rest)
-    <<0x0A, rest:bits>> -> skip_html_ws(rest)
-    <<0x0C, rest:bits>> -> skip_html_ws(rest)
-    <<0x0D, rest:bits>> -> skip_html_ws(rest)
-    _ -> bytes
-  }
+  |> charset.strip_utf8_bom
+  |> charset.skip_whitespace
 }
 
 fn is_text_terminator(bytes: BitArray) -> Bool {
@@ -702,15 +685,8 @@ fn looks_like_svg(bytes: BitArray) -> Bool {
 
 fn is_xml_element_terminator(bytes: BitArray) -> Bool {
   case bytes {
-    <<>> -> True
-    <<0x20, _:bits>> -> True
-    <<0x09, _:bits>> -> True
-    <<0x0A, _:bits>> -> True
-    <<0x0C, _:bits>> -> True
-    <<0x0D, _:bits>> -> True
-    <<0x3E, _:bits>> -> True
     <<0x2F, _:bits>> -> True
-    _ -> False
+    _ -> is_text_terminator(bytes)
   }
 }
 
@@ -722,7 +698,7 @@ fn skip_xml_prolog(bytes: BitArray, budget: Int) -> BitArray {
 
 fn skip_xml_misc(bytes: BitArray, budget: Int) -> BitArray {
   use <- bool.guard(when: budget <= 0, return: bytes)
-  let trimmed = skip_html_ws(bytes)
+  let trimmed = charset.skip_whitespace(bytes)
   use <- bool.lazy_guard(
     when: starts_with_literal(trimmed, <<"<!--":utf8>>),
     return: fn() {

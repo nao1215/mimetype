@@ -163,27 +163,29 @@ fn second_byte_ok(lead: Int, second: Int) -> Bool {
 
 fn starts_with_xml_prolog(bytes: BitArray) -> Bool {
   let stripped = strip_utf8_bom(bytes)
-  let trimmed = skip_ws(stripped)
+  let trimmed = skip_whitespace(stripped)
   case trimmed {
     <<"<?xml":utf8, _:bits>> -> True
     _ -> False
   }
 }
 
-fn strip_utf8_bom(bytes: BitArray) -> BitArray {
+/// Drop a leading UTF-8 byte order mark.
+pub fn strip_utf8_bom(bytes: BitArray) -> BitArray {
   case bytes {
     <<0xEF, 0xBB, 0xBF, rest:bits>> -> rest
     _ -> bytes
   }
 }
 
-fn skip_ws(bytes: BitArray) -> BitArray {
+/// Drop leading HTML whitespace (space, tab, LF, FF, CR).
+pub fn skip_whitespace(bytes: BitArray) -> BitArray {
   case bytes {
-    <<0x20, rest:bits>> -> skip_ws(rest)
-    <<0x09, rest:bits>> -> skip_ws(rest)
-    <<0x0A, rest:bits>> -> skip_ws(rest)
-    <<0x0C, rest:bits>> -> skip_ws(rest)
-    <<0x0D, rest:bits>> -> skip_ws(rest)
+    <<0x20, rest:bits>> -> skip_whitespace(rest)
+    <<0x09, rest:bits>> -> skip_whitespace(rest)
+    <<0x0A, rest:bits>> -> skip_whitespace(rest)
+    <<0x0C, rest:bits>> -> skip_whitespace(rest)
+    <<0x0D, rest:bits>> -> skip_whitespace(rest)
     _ -> bytes
   }
 }

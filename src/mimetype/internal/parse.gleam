@@ -153,54 +153,21 @@ fn split_unquoted_loop(
 ) -> List(String) {
   case string.pop_grapheme(remaining) {
     Error(Nil) -> [current, ..acc]
-    Ok(#(g, rest)) ->
-      case escape, g, in_quote {
-        True, _, _ ->
-          split_unquoted_loop(
-            rest,
-            separator,
-            current <> g,
-            acc,
-            in_quote,
-            False,
-          )
-        False, "\\", True ->
-          split_unquoted_loop(
-            rest,
-            separator,
-            current <> g,
-            acc,
-            in_quote,
-            True,
-          )
-        False, "\"", _ ->
-          split_unquoted_loop(
-            rest,
-            separator,
-            current <> g,
-            acc,
-            !in_quote,
-            False,
-          )
-        False, _, False if g == separator ->
-          split_unquoted_loop(
-            rest,
-            separator,
-            "",
-            [current, ..acc],
-            False,
-            False,
-          )
-        False, _, _ ->
-          split_unquoted_loop(
-            rest,
-            separator,
-            current <> g,
-            acc,
-            in_quote,
-            False,
-          )
+    Ok(#(g, rest)) -> {
+      let #(current, acc, in_quote, escape) = case escape, g, in_quote {
+        True, _, _ -> #(current <> g, acc, in_quote, False)
+        False, "\\", True -> #(current <> g, acc, in_quote, True)
+        False, "\"", _ -> #(current <> g, acc, !in_quote, False)
+        False, _, False if g == separator -> #(
+          "",
+          [current, ..acc],
+          False,
+          False,
+        )
+        False, _, _ -> #(current <> g, acc, in_quote, False)
       }
+      split_unquoted_loop(rest, separator, current, acc, in_quote, escape)
+    }
   }
 }
 

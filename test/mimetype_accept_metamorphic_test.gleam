@@ -1,6 +1,6 @@
 //// Metamorphic and differential tests for content negotiation.
 ////
-//// - Differential: `accept.negotiate_strings` against a small reference
+//// - Differential: `accept.negotiate` against a small reference
 ////   model of RFC 9110 §12.5.1 written here, where the most specific
 ////   matching media range decides an offer's q-value (so `text/html;q=0`
 ////   excludes text/html even with `*/*` present).
@@ -18,10 +18,11 @@ import gleam/string
 import metamon
 import metamon/generator.{type Generator}
 import metamon/generator/range
+import mimetype
 import mimetype/accept
 
 type Entry {
-  Entry(range: String, ext: Bool, q: Option(String))
+  Entry(range: String, ext: Bool, quality: Option(String))
 }
 
 const ranges = [
@@ -67,7 +68,7 @@ fn render(entries: List(Entry)) -> String {
   entries
   |> list.map(fn(e) {
     // An accept-ext must follow q, so a q-less entry gets q=1 first.
-    let q_param = case e.q, e.ext {
+    let q_param = case e.quality, e.ext {
       Some(raw), _ -> ";q=" <> raw
       None, True -> ";q=1"
       None, False -> ""
@@ -82,7 +83,7 @@ fn render(entries: List(Entry)) -> String {
 }
 
 fn q_of(e: Entry) -> Float {
-  case e.q {
+  case e.quality {
     None -> 1.0
     Some(raw) ->
       case float.parse(raw) {
@@ -167,8 +168,8 @@ fn compare_scores(
 fn reference(
   entries: List(Entry),
   offers: List(String),
-) -> Result(String, accept.NegotiateError) {
-  let best = case entries {
+) -> Result(String, Nil) {
+  case entries {
     [] -> list.first(offers)
     _ ->
       offers
@@ -178,7 +179,6 @@ fn reference(
       |> list.first
       |> result.map(fn(t) { t.3 })
   }
-  result.replace_error(best, accept.NoOverlap)
 }
 
 fn compare_key(a: #(Int, Int), b: #(Int, Int)) -> order.Order {
@@ -191,8 +191,22 @@ fn compare_key(a: #(Int, Int), b: #(Int, Int)) -> order.Order {
 fn negotiate(
   entries: List(Entry),
   offers: List(String),
-) -> Result(String, accept.NegotiateError) {
-  accept.negotiate_strings(header: render(entries), offers: offers)
+) -> Result(String, Nil) {
+  let assert Ok(items) = accept.parse(render(entries))
+  let offers =
+    list.map(offers, fn(offer) {
+      let assert Ok(mime) = mimetype.parse(offer)
+      mime
+    })
+  accept.negotiate(items, offers) |> result.map(mimetype.to_string)
+}
+
+fn negotiate_encoding(
+  header: String,
+  offers: List(String),
+) -> Result(String, Nil) {
+  let assert Ok(items) = accept.parse_values(header)
+  accept.negotiate_value(items, offers)
 }
 
 pub fn negotiate_matches_rfc_9110_reference_model_test() -> Nil {
@@ -227,8 +241,7 @@ pub fn negotiate_returns_an_offer_and_keeps_it_when_others_are_dropped_test() ->
   metamon.forall(generator.tuple2(entries_gen(), offers_gen()), fn(input) {
     let #(entries, offers) = input
     case negotiate(entries, offers) {
-      Error(accept.NoOverlap) -> True
-      Error(accept.InvalidHeader(_)) | Error(accept.InvalidOffer(_)) -> False
+      Error(Nil) -> True
       Ok(chosen) ->
         list.contains(offers, chosen)
         && negotiate(entries, [chosen]) == Ok(chosen)
@@ -272,14 +285,8 @@ pub fn negotiate_encoding_ignores_the_order_of_client_entries_test() -> Nil {
         |> list.sort(fn(a, b) { int.compare(a.1, b.1) })
         |> list.map(fn(p) { p.0 })
       let offers = list.unique(offers)
-      accept.negotiate_encoding_strings(
-        header: header(shuffled),
-        offers: offers,
-      )
-      == accept.negotiate_encoding_strings(
-        header: header(entries),
-        offers: offers,
-      )
+      negotiate_encoding(header(shuffled), offers)
+      == negotiate_encoding(header(entries), offers)
     },
   )
 }

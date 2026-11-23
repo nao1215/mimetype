@@ -1,8 +1,6 @@
-//// Filename / extension lookup helpers.
+//// Extension and filename lookups on the generated mime-db tables.
 ////
-//// These operate on plain strings (extensions, paths) and surface the
-//// result as `Option(String)` / `Result(String, Nil)` of essence
-//// names. The facade (`mimetype`) wraps the essence into a `MimeType`.
+//// The tables are generated from jshttp/mime-db into `internal/db`.
 
 import gleam/bool
 import gleam/list
@@ -10,11 +8,8 @@ import gleam/option.{type Option, None, Some}
 import gleam/string
 import mimetype/internal/db
 
-/// Look up the essence string for a normalised file extension.
-///
-/// `Error(Nil)` means the extension was not in the generated database.
-/// The caller is responsible for normalising (`normalize_extension`)
-/// before calling this — `lookup` does not do it for you.
+/// Look up the essence for an extension already passed through
+/// `normalize_extension`.
 pub fn essence_for_extension(normalized: String) -> Result(String, Nil) {
   db.extension_to_mime_type(normalized)
 }

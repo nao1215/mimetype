@@ -1,180 +1,106 @@
-//// MIME type lookup and byte-signature detection for Gleam.
+//// Look up MIME types by file extension and detect them from the leading
+//// bytes of a file.
 ////
-//// The public API is built around the opaque `MimeType` value: every
-//// detection / lookup function returns a `MimeType` (or
-//// `Result(MimeType, _)`), and predicates / accessors operate on
-//// `MimeType` rather than ad-hoc strings. Use `parse/1` to construct a
-//// `MimeType` from a wire-format string and `to_string/1` to serialise
-//// one back out (e.g. for an HTTP `Content-Type` header).
-////
-//// The library intentionally separates:
-//// - extension / filename lookup, which is cheap and deterministic
-//// - magic-number detection, which inspects the leading bytes
-//// - combined helpers, which prefer content-based detection and fall
-////   back to metadata when the byte signature is unknown
+//// Every lookup and detection function returns a `MimeType`. Build one
+//// from a string with `parse`, and turn it back into a header value with
+//// `to_string`. Content negotiation for `Accept` headers lives in
+//// `mimetype/accept`.
 
+import gleam/bit_array
 import gleam/bool
 import gleam/list
-import gleam/option.{type Option, None, Some}
+import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
-import mimetype/internal/detect as detect_internal
+import mimetype/internal/charset as charset_internal
 import mimetype/internal/lookup as lookup_internal
+import mimetype/internal/magic
 import mimetype/internal/parse as parse_internal
 import mimetype/internal/predicates as predicates_internal
 
-/// A normalised, validated MIME type.
+/// A MIME type such as `text/html; charset=utf-8`.
 ///
-/// Construct one with `parse/1` (from a wire-format string), or via the
-/// detection / lookup helpers (`detect/1`, `extension_to_mime_type/1`,
-/// `filename_to_mime_type/1`, ...). Inspect with `essence_of/1`,
-/// `parameter_of/2`, `charset_of_type/1`, `is_image/1`, `is_a/2`, and
-/// the rest of the predicate / accessor family. Serialise back to a
-/// string with `to_string/1`.
+/// The type and subtype are lowercase, and every parameter has a valid
+/// name and value. `parse` and the lookup and detection functions are
+/// the only ways to make one.
 pub opaque type MimeType {
+  // `essence` is trimmed, lowercased and matches `type/subtype`.
+  // Parameter names are lowercased tokens; values hold no control bytes.
   MimeType(essence: String, parameters: List(#(String, String)))
 }
 
-/// Why `parse/1` rejected a string.
+/// The reason `parse` or `parse_strict` rejected a string.
 pub type ParseError {
-  /// The input was empty or contained only whitespace.
+  /// The input was empty or only whitespace.
   EmptyMimeType
-  /// The input did not match the `type/subtype` essence shape required
-  /// by RFC 6838. The original input is carried so the caller can
-  /// render it without re-parsing.
+  /// The part before the first `;` is not a `type/subtype` pair. Holds
+  /// the whole input.
   InvalidMimeType(String)
-  /// A parameter name was not a valid RFC 9110 §5.6.6 / RFC 7230
-  /// §3.2.6 `token`. Most commonly this means the name contained
-  /// whitespace (SP, HTAB) or another non-tchar codepoint —
-  /// `"chars et"`, `"cha\tarset"`, etc. Carries the trimmed but
-  /// non-case-folded name so callers can render an actionable error
-  /// like "parameter name 'chars et' contains whitespace".
-  /// Round-tripping such a name through `to_string` would otherwise
-  /// emit a malformed `Content-Type` header that RFC-strict HTTP
-  /// receivers drop the parameter from.
+  /// A parameter name is not an HTTP token, for example because it
+  /// contains a space.
   InvalidParameterName(name: String)
-  /// A parameter value contained an ASCII control byte that is valid
-  /// in neither `token` nor `quoted-string` per RFC 7231 §3.1.1.1.
-  /// Carries the parameter name and the offending codepoint so the
-  /// caller can render an actionable error like
-  /// "parameter 'charset' contains forbidden control byte 0x01".
-  /// Allowed: HTAB (0x09) and every byte at or above 0x20 except DEL
-  /// (0x7F). Rejected: 0x00-0x08, 0x0A-0x1F, 0x7F.
+  /// A parameter value contains a control byte (0x00 to 0x1F other than
+  /// tab, or 0x7F). Holds the parameter name and the byte.
   InvalidParameterValue(parameter: String, byte: Int)
-  /// A `;`-separated segment was not a well-formed `name=value`
-  /// parameter — a trailing / bare / consecutive `;` (empty segment),
-  /// a segment with no `=value`, or an empty parameter name (`;=v`) —
-  /// all RFC 7231 §3.1.1.1 violations. Only `parse_strict/1` returns
-  /// this; the lenient `parse/1` silently drops such segments. Carries
-  /// the offending segment (trimmed).
+  /// A `;`-separated segment is not `name=value`. Only `parse_strict`
+  /// returns this.
   MalformedParameter(segment: String)
 }
 
-/// Reasons the strict detection family can return `Error(_)`.
+/// `application/octet-stream`, the type for bytes of unknown format.
 ///
-/// The error is structured so callers can distinguish "no signature
-/// matched" from "the reader itself failed before any bytes could be
-/// inspected" from "the supplied filename / extension is not in the
-/// database" from "the input was empty" — useful for HTTP upload
-/// pipelines that want to render each case differently. `read_error`
-/// is the type the supplied `Reader` produces; it flows through
-/// unchanged when the reader fails. Strict functions that do not take
-/// a reader use `DetectionError(Nil)`; the `SimpleDetectionError`
-/// alias below is the recommended name for that shape at non-reader
-/// call sites.
-pub type DetectionError(read_error) {
-  /// No signature matched the bytes that were inspected, and no
-  /// filename / extension hint resolved.
-  NoMatch
-  /// The supplied filename or extension is not present in the MIME
-  /// database. Carries the normalised extension so callers can render
-  /// "we don't recognise the `.xyz` extension" without re-parsing.
-  UnknownExtension(String)
-  /// The input was empty: a zero-byte `BitArray`, an empty extension
-  /// string, or a filename whose path component carries no usable
-  /// extension. Distinguished from `NoMatch` so callers can render
-  /// "you didn't give us anything to look at" differently from "we
-  /// looked and didn't find a match".
-  EmptyInput
-  /// The reader returned an error before any bytes could be inspected.
-  ReaderError(read_error)
-}
-
-/// Convenience alias for the non-reader detection error shape:
-/// `SimpleDetectionError = DetectionError(Nil)`. Use this name when
-/// `detect_strict` and the other non-reader functions appear in
-/// caller signatures — the `Nil` slot is structurally unreachable
-/// for code that does not use the `Reader` family, so naming it
-/// explicitly at every call site is noise. Reader callers continue
-/// to use `DetectionError(read_error)` directly.
-pub type SimpleDetectionError =
-  DetectionError(Nil)
-
-/// A callback that reads up to the requested number of bytes from an
-/// input source. Returns `Ok(bits)` with the bytes actually read, or
-/// `Error(reason)` if the read fails. A reader that returns fewer bytes
-/// than requested signals end-of-input.
+/// Use it as the fallback when a lookup or detection fails:
 ///
-/// The error type is generic so JS-side readers (FileReader,
-/// ReadableStream) and BEAM-side readers (file handles, HTTP clients)
-/// can preserve their richer error shapes through `detect_reader_strict`.
-pub type Reader(read_error) =
-  fn(Int) -> Result(BitArray, read_error)
-
-/// Fallback `MimeType` returned by lenient detection / lookup helpers
-/// when no more specific answer is available. Equivalent to
-/// `application/octet-stream` with no parameters.
-pub const default_mime_type: MimeType =
+/// ```gleam
+/// mimetype.detect(bytes) |> result.unwrap(mimetype.octet_stream)
+/// ```
+///
+pub const octet_stream: MimeType =
   MimeType(essence: "application/octet-stream", parameters: [])
 
-/// Default upper bound on the number of leading bytes inspected by
-/// `detect` and `detect_strict`.
-///
-/// 3072 bytes is large enough for every signature this library ships
-/// (the largest fixed-offset check is `application/x-tar` at offset
-/// 257, plus envelope formats like ZIP central-directory inspection
-/// reach into the first few KB) and matches the default used by Go's
-/// `gabriel-vasile/mimetype` library. Pass an explicit limit via
-/// `detect_with_limit` / `detect_with_limit_strict` to override.
-pub const default_detection_limit = 3072
+// Detection looks at no more than this many leading bytes. Every
+// signature in `internal/magic` fits inside it.
+const detection_limit = 3072
 
 // ---------------------------------------------------------------------------
-// Construction and serialisation
+// Parsing and serialising
 // ---------------------------------------------------------------------------
 
-/// Parse a MIME type string into a `MimeType` value.
+/// Parses a MIME type such as a `Content-Type` header value.
 ///
-/// The essence (`type/subtype`) is trimmed and lowercased, and any
-/// `; key=value` parameters are parsed and stored on the value so
-/// later accessors don't have to re-parse. Returns:
+/// The type and subtype are lowercased and parameter names are
+/// lowercased; parameter values keep their case, and quoted values are
+/// unquoted. Empty segments such as a trailing `;` are dropped. Use
+/// `parse_strict` to reject them instead.
 ///
-/// - `Error(EmptyMimeType)` for empty / whitespace-only input.
-/// - `Error(InvalidMimeType(original))` when the essence does not
-///   match the `type/subtype` shape required by RFC 6838.
-/// - `Error(InvalidParameterName(name))` when a parameter name is not
-///   a valid RFC 9110 §5.6.6 / RFC 7230 §3.2.6 `token` (most often
-///   because it contains whitespace or another non-tchar codepoint).
-/// - `Error(InvalidParameterValue(parameter, byte))` when a parameter
-///   value contains an ASCII control byte that is valid in neither
-///   `token` nor `quoted-string` per RFC 7231 §3.1.1.1 (0x00-0x1F
-///   except HTAB `0x09`, and DEL `0x7F`). These bytes would produce
-///   a malformed `Content-Type` header on the wire.
+/// ## Examples
+///
+/// ```gleam
+/// let assert Ok(html) = mimetype.parse("Text/HTML; Charset=UTF-8")
+/// mimetype.to_string(html)
+/// // -> "text/html; charset=UTF-8"
+/// ```
+///
+/// ```gleam
+/// mimetype.parse("html")
+/// // -> Error(InvalidMimeType("html"))
+/// ```
+///
 pub fn parse(input: String) -> Result(MimeType, ParseError) {
   parse_internal.parse_string(input) |> map_parse_result
 }
 
-/// Strict counterpart of [`parse/1`](#parse). In addition to everything
-/// `parse` rejects, each `;`-separated segment MUST be a well-formed
-/// `name=value` parameter per RFC 7231 §3.1.1.1 — a trailing / bare /
-/// consecutive `;`, a segment with no `=value`, and an empty parameter
-/// name are rejected with `Error(MalformedParameter(segment))` instead of
-/// being silently dropped.
+/// Parses a MIME type like `parse`, but returns
+/// `Error(MalformedParameter(segment))` for a segment that is not
+/// `name=value`, such as a trailing `;` or `;charset`.
 ///
-/// `parse/1` stays lenient because real-world HTTP `Content-Type` headers
-/// commonly carry stray semicolons and whitespace; reach for `parse_strict`
-/// when the input must conform to the RFC grammar exactly (validating a
-/// configuration value, a manifest field, or test fixtures), so a malformed
-/// parameter list is reported rather than quietly thrown away.
+/// ## Examples
+///
+/// ```gleam
+/// mimetype.parse_strict("text/plain;")
+/// // -> Error(MalformedParameter(""))
+/// ```
+///
 pub fn parse_strict(input: String) -> Result(MimeType, ParseError) {
   parse_internal.parse_string_strict(input) |> map_parse_result
 }
@@ -186,546 +112,417 @@ fn map_parse_result(
   ),
 ) -> Result(MimeType, ParseError) {
   case result {
-    Ok(#(essence, parameters)) ->
-      Ok(MimeType(essence: essence, parameters: parameters))
+    Ok(#(essence, parameters)) -> Ok(MimeType(essence:, parameters:))
     Error(parse_internal.Empty) -> Error(EmptyMimeType)
     Error(parse_internal.InvalidEssence(original)) ->
       Error(InvalidMimeType(original))
     Error(parse_internal.InvalidParameterName(name:)) ->
-      Error(InvalidParameterName(name: name))
+      Error(InvalidParameterName(name:))
     Error(parse_internal.InvalidParameterValue(parameter:, byte:)) ->
-      Error(InvalidParameterValue(parameter: parameter, byte: byte))
+      Error(InvalidParameterValue(parameter:, byte:))
     Error(parse_internal.MalformedParameter(segment:)) ->
-      Error(MalformedParameter(segment: segment))
+      Error(MalformedParameter(segment:))
   }
 }
 
-/// Serialise a `MimeType` back to its wire-format string. The output
-/// always normalises whitespace ("`type/subtype; key=value`" with a
-/// single space after each semicolon) and is round-trippable through
-/// `parse/1`.
+/// Converts a `MimeType` to a header value.
 ///
-/// Parameter values that are not a valid `token` per RFC 7230 §3.2.6
-/// (including the empty string and any value containing whitespace,
-/// `;`, `,`, `"`, etc.) are wrapped in a quoted-string with inner
-/// `"` and `\` backslash-escaped. Token-valid values pass through
-/// unchanged so the common case (`charset=utf-8`, `boundary=abc123`)
-/// stays unquoted.
-pub fn to_string(mt: MimeType) -> String {
-  parse_internal.serialise(mt.essence, mt.parameters)
+/// Parameters are joined with `"; "`. A value that is not an HTTP token,
+/// such as one with a space or an empty value, is written as a quoted
+/// string. The result parses back to the same `MimeType`.
+///
+/// ## Examples
+///
+/// ```gleam
+/// let assert Ok(mime) = mimetype.parse("text/plain;title=\"a b\"")
+/// mimetype.to_string(mime)
+/// // -> "text/plain; title=\"a b\""
+/// ```
+///
+pub fn to_string(mime: MimeType) -> String {
+  parse_internal.serialise(mime.essence, mime.parameters)
 }
 
 // ---------------------------------------------------------------------------
-// Accessors
+// Reading a MIME type
 // ---------------------------------------------------------------------------
 
-/// Return the bare essence (`type/subtype`) of a `MimeType`, with all
-/// parameters stripped. The result is already trimmed and lowercased.
-pub fn essence_of(mt: MimeType) -> String {
-  mt.essence
+/// Returns the `type/subtype` part without parameters.
+///
+/// ## Examples
+///
+/// ```gleam
+/// let assert Ok(html) = mimetype.parse("text/html; charset=utf-8")
+/// mimetype.essence(html)
+/// // -> "text/html"
+/// ```
+///
+pub fn essence(mime: MimeType) -> String {
+  mime.essence
 }
 
-/// Look up a parameter value on a `MimeType`. Returns `None` for
-/// missing parameters and for an empty / whitespace-only `key`.
+/// Returns the value of the named parameter.
 ///
-/// ## Parameter handling
+/// The name is matched without regard to case. If the parameter appears
+/// more than once, the first one wins. Returns `Error(Nil)` when the
+/// parameter is missing or its value is empty.
 ///
-/// - **Duplicate names**: when the input string carries the same
-///   parameter name twice (e.g. `text/plain; charset=utf-8; charset=ascii`),
-///   the *first* occurrence wins. RFC 7231 does not define a winner,
-///   so this lookup commits to a deterministic rule rather than letting
-///   the result depend on `parse/1`'s storage order.
-/// - **Case-insensitive lookup**: both the `key` argument and the
-///   stored parameter names are normalised to lowercase, so
-///   `parameter_of(parse("text/plain; CHARSET=UTF-8"), "CharSet")`
-///   returns `Some("UTF-8")`. Names are case-insensitive per the spec;
-///   values are returned with their original case preserved.
-/// - **Whitespace on values**: surrounding whitespace is stripped from
-///   the stored value (`text/plain; charset=  utf-8` → `Some("utf-8")`).
-///   Whitespace *inside* a quoted-string is part of the value and is
-///   preserved verbatim (`text/plain; description="hello world"` →
-///   `Some("hello world")`).
-/// - **Empty values**: an empty parameter value (e.g.
-///   `text/plain; charset=`) is collapsed to `None`. RFC 9110 / RFC 7230
-///   define `parameter-value` as `token / quoted-string`, both of which
-///   require at least one octet, so `Some("")` would imply a value that
-///   the grammar does not actually permit. Callers reading `Some(_)` can
-///   then assume the wrapped string carries information.
-pub fn parameter_of(mt: MimeType, key: String) -> Option(String) {
-  let requested = key |> string.trim |> string.lowercase
-  use <- bool.lazy_guard(when: requested == "", return: fn() { None })
-  mt.parameters
-  |> list.find_map(fn(p) {
-    let #(name, value) = p
-    case name == requested && value != "" {
-      True -> Ok(value)
-      False -> Error(Nil)
+/// ## Examples
+///
+/// ```gleam
+/// let assert Ok(form) = mimetype.parse("multipart/form-data; boundary=xyz")
+/// mimetype.parameter(form, "Boundary")
+/// // -> Ok("xyz")
+/// ```
+///
+/// ```gleam
+/// mimetype.parameter(form, "charset")
+/// // -> Error(Nil)
+/// ```
+///
+pub fn parameter(mime: MimeType, name: String) -> Result(String, Nil) {
+  let name = name |> string.trim |> string.lowercase
+  use <- bool.guard(when: name == "", return: Error(Nil))
+  list.find_map(mime.parameters, fn(parameter) {
+    case parameter {
+      #(key, value) if key == name && value != "" -> Ok(value)
+      _ -> Error(Nil)
     }
   })
-  |> option.from_result
 }
 
-/// Return the `charset` parameter from a `MimeType` (lowercased), if
-/// present. Equivalent to `parameter_of(mt, "charset")` followed by
-/// `string.lowercase`.
-pub fn charset_of_type(mt: MimeType) -> Option(String) {
-  case parameter_of(mt, "charset") {
-    Some(value) -> Some(string.lowercase(value))
-    None -> None
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Family predicates
-// ---------------------------------------------------------------------------
-
-/// Return `True` when the MIME type's top-level media type is `image`.
-pub fn is_image(mt: MimeType) -> Bool {
-  predicates_internal.is_image_essence(mt.essence)
-}
-
-/// Return `True` when `mt` is safe to treat as text: the `text/*`
-/// family, plus `application/*` types whose payload is inherently
-/// text-encoded.
+/// Returns the `charset` parameter, lowercased.
 ///
-/// The latter set covers `application/json` (RFC 8259 §8.1 mandates
-/// UTF-8 / UTF-16 / UTF-32), `application/javascript` /
-/// `application/ecmascript`, `application/sql` / `application/x-sql`,
-/// and every RFC 6839 §3.1 `+json` / `+xml` structured-syntax-suffix
-/// type. Callers that want a strictly top-level `text/*` check should
-/// use `string.starts_with(essence_of(mt), "text/")` directly.
-pub fn is_text(mt: MimeType) -> Bool {
-  predicates_internal.is_text_essence(mt.essence)
-}
-
-/// Return `True` when the MIME type's top-level media type is `audio`.
-pub fn is_audio(mt: MimeType) -> Bool {
-  predicates_internal.is_audio_essence(mt.essence)
-}
-
-/// Return `True` when the MIME type's top-level media type is `video`.
-pub fn is_video(mt: MimeType) -> Bool {
-  predicates_internal.is_video_essence(mt.essence)
-}
-
-/// Return `True` when `mime` is `parent` or transitively inherits from
-/// `parent` in the static subtype tree.
+/// ## Examples
 ///
-/// The relation is reflexive (`is_a(x, x)` is always `True` for any
-/// non-empty `x`) and transitive (if `a` inherits from `b` and `b`
-/// inherits from `c`, then `is_a(a, c)` is `True`).
+/// ```gleam
+/// let assert Ok(html) = mimetype.parse("text/html; charset=UTF-8")
+/// mimetype.charset(html)
+/// // -> Ok("utf-8")
+/// ```
+///
+pub fn charset(mime: MimeType) -> Result(String, Nil) {
+  parameter(mime, "charset") |> result.map(string.lowercase)
+}
+
+/// Returns `True` when the top-level type is `image`.
+///
+pub fn is_image(mime: MimeType) -> Bool {
+  predicates_internal.is_image_essence(mime.essence)
+}
+
+/// Returns `True` for types whose content is text: every `text/*` type,
+/// `application/json`, `application/xml`, `application/javascript`,
+/// `application/ecmascript`, `application/sql`, `application/x-sql`, and
+/// every type ending in `+json` or `+xml`.
+///
+/// For a check on the top-level type alone, use
+/// `string.starts_with(mimetype.essence(mime), "text/")`.
+///
+pub fn is_text(mime: MimeType) -> Bool {
+  predicates_internal.is_text_essence(mime.essence)
+}
+
+/// Returns `True` when the top-level type is `audio`.
+///
+pub fn is_audio(mime: MimeType) -> Bool {
+  predicates_internal.is_audio_essence(mime.essence)
+}
+
+/// Returns `True` when the top-level type is `video`.
+///
+pub fn is_video(mime: MimeType) -> Bool {
+  predicates_internal.is_video_essence(mime.essence)
+}
+
+/// Returns `True` when `mime` is `parent` or a kind of `parent`.
+///
+/// Parameters are ignored. The relation comes from a built-in table
+/// (`.docx` is a kind of `application/zip`, `image/svg+xml` of
+/// `text/xml`) and from the `+xml`, `+json`, `+zip` and `+cbor`
+/// suffixes.
+///
+/// ## Examples
+///
+/// ```gleam
+/// let assert Ok(epub) = mimetype.parse("application/epub+zip")
+/// let assert Ok(zip) = mimetype.parse("application/zip")
+/// mimetype.is_a(epub, zip)
+/// // -> True
+/// ```
+///
 pub fn is_a(mime: MimeType, parent: MimeType) -> Bool {
   predicates_internal.is_a(mime.essence, parent.essence)
 }
 
-/// Return `True` when `mime` is, or inherits from, `application/zip`.
+/// Returns `True` for `application/zip` and the formats stored as ZIP
+/// archives, such as `.docx`, `.epub`, `.jar` and `.apk`.
 ///
-/// Convenience wrapper for `is_a(mime, parse("application/zip"))`.
-/// Returns `True` for `.docx` / `.xlsx` / `.epub` / `.apk` and other
-/// ZIP-based container formats.
 pub fn is_zip_based(mime: MimeType) -> Bool {
   predicates_internal.is_a(mime.essence, "application/zip")
 }
 
-/// Return `True` when `mime` is, or inherits from, an XML media type.
+/// Returns `True` for `text/xml`, `application/xml` and the types built
+/// on them, such as `image/svg+xml` and `application/atom+xml`.
 ///
-/// Both `text/xml` and `application/xml` are accepted as XML roots,
-/// in line with RFC 7303 which permits both. Returns `True` for
-/// `image/svg+xml` and any other `*+xml` types added to the hierarchy.
 pub fn is_xml_based(mime: MimeType) -> Bool {
   predicates_internal.is_a(mime.essence, "text/xml")
   || predicates_internal.is_a(mime.essence, "application/xml")
 }
 
-/// Return the chain of ancestors of `mime`, ordered from immediate
-/// parent to root.
+/// Returns the types `mime` is a kind of, nearest first. See `is_a`.
 ///
-/// Empty input or roots return `[]`. The returned list does not
-/// include `mime` itself; use `is_a(mime, mime)` (always `True`) if
-/// you need reflexive membership.
+/// ## Examples
+///
+/// ```gleam
+/// let assert Ok(docx) =
+///   mimetype.parse(
+///     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+///   )
+/// mimetype.ancestors(docx) |> list.map(mimetype.to_string)
+/// // -> ["application/zip"]
+/// ```
+///
 pub fn ancestors(mime: MimeType) -> List(MimeType) {
   predicates_internal.ancestors(mime.essence)
-  |> list.map(from_essence)
+  |> list.map(fn(essence) { MimeType(essence:, parameters: []) })
 }
 
 // ---------------------------------------------------------------------------
-// Charset detection from raw bytes
+// Extensions and filenames
 // ---------------------------------------------------------------------------
 
-/// Detect the character encoding (charset) of a `BitArray`.
+/// Looks up the MIME type for a file extension.
 ///
-/// Returns `Ok(charset)` when one of the following signals fires
-/// (in priority order):
+/// A leading dot, surrounding whitespace and case are ignored. Returns
+/// `Error(Nil)` for an empty or unknown extension. The table comes from
+/// `jshttp/mime-db`.
 ///
-///   1. A Unicode BOM (UTF-8 / UTF-16 LE/BE / UTF-32 LE/BE).
-///   2. An XML prolog `<?xml ... encoding="..." ?>`.
-///   3. An HTML `<meta charset="...">` (or `<meta http-equiv=... content=...>`)
-///      tag in the first 1 KB.
-///   4. A UTF-8 validity scan: `utf-8` for input that contains valid
-///      multi-byte UTF-8 sequences, `us-ascii` for input that is
-///      entirely 0x00–0x7F.
+/// ## Examples
 ///
-/// Returns `Error(EmptyInput)` for the zero-byte `BitArray`, and
-/// `Error(NoMatch)` for inputs whose encoding cannot be determined
-/// (typically non-UTF-8 high-byte content like Latin-1 or Shift_JIS
-/// without an in-document declaration). Charset names are returned in
-/// lowercase, matching the convention used by IANA's charset registry.
+/// ```gleam
+/// mimetype.extension_to_mime_type(".JSON") |> result.map(mimetype.to_string)
+/// // -> Ok("application/json")
+/// ```
 ///
-/// The result is a charset name (e.g. `"utf-8"`), not a `MimeType`,
-/// because the caller typically pairs it with a separately determined
-/// media type via `parameter_of` / `charset_of_type` rather than as a
-/// standalone MIME value.
-pub fn charset_of(bytes: BitArray) -> Result(String, SimpleDetectionError) {
-  detect_internal.charset_of(bytes) |> result.map_error(detect_failure_to_error)
+/// ```gleam
+/// mimetype.extension_to_mime_type("nosuch")
+/// // -> Error(Nil)
+/// ```
+///
+pub fn extension_to_mime_type(extension: String) -> Result(MimeType, Nil) {
+  let extension = lookup_internal.normalize_extension(extension)
+  use <- bool.guard(when: extension == "", return: Error(Nil))
+  lookup_internal.essence_for_extension(extension) |> result.map(from_table)
 }
 
-// ---------------------------------------------------------------------------
-// Lookup: extension → MIME
-// ---------------------------------------------------------------------------
-
-/// Look up a `MimeType` from a file extension.
+/// Looks up the MIME type for the last extension in a path or file name.
 ///
-/// The input may include a leading dot and is normalised to lowercase
-/// before lookup. Unknown / empty inputs fall back to
-/// `default_mime_type`.
-pub fn extension_to_mime_type(extension: String) -> MimeType {
-  extension_to_mime_type_strict(extension)
-  |> result.unwrap(default_mime_type)
-}
-
-/// Look up a `MimeType` from a file extension.
+/// Directories, a `?query` and a `#fragment` are ignored, and both `/`
+/// and `\` separate directories. Returns `Error(Nil)` when the name has
+/// no extension (`README`, `.gitignore`) or the extension is unknown.
 ///
-/// Returns `Error(EmptyInput)` when the input normalises to the empty
-/// string (e.g. `""`, `"."`, `"   "`). Returns
-/// `Error(UnknownExtension(ext))` when the normalised extension is
-/// not present in the generated database, carrying the lookup key so
-/// the caller can render it without re-parsing.
-pub fn extension_to_mime_type_strict(
-  extension: String,
-) -> Result(MimeType, SimpleDetectionError) {
-  let normalized = lookup_internal.normalize_extension(extension)
-  use <- bool.guard(when: normalized == "", return: Error(EmptyInput))
-  case lookup_internal.essence_for_extension(normalized) {
-    Ok(s) -> Ok(from_internal(s))
-    Error(Nil) -> Error(UnknownExtension(normalized))
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Lookup: MIME → extensions
-// ---------------------------------------------------------------------------
-
-/// Return all known extensions for a `MimeType`. Unknown MIME types
-/// return the empty list.
-pub fn mime_type_to_extensions(mt: MimeType) -> List(String) {
-  mime_type_to_extensions_strict(mt) |> result.unwrap([])
-}
-
-/// Return all known extensions for a `MimeType`.
+/// ## Examples
 ///
-/// Strict variant; returns `Error(Nil)` when the essence is not in the
-/// generated database.
-pub fn mime_type_to_extensions_strict(
-  mt: MimeType,
-) -> Result(List(String), Nil) {
-  lookup_internal.extensions_for_essence(mt.essence)
-}
-
-// ---------------------------------------------------------------------------
-// Lookup: filename → MIME
-// ---------------------------------------------------------------------------
-
-/// Look up a `MimeType` from the last extension component of a path
-/// or filename.
+/// ```gleam
+/// mimetype.filename_to_mime_type("photos/IMG_0001.JPG")
+/// |> result.map(mimetype.to_string)
+/// // -> Ok("image/jpeg")
+/// ```
 ///
-/// Query strings and URL fragments are ignored. Hidden files without
-/// a real extension, such as `.gitignore`, fall back to
-/// `default_mime_type`.
-pub fn filename_to_mime_type(path: String) -> MimeType {
-  filename_to_mime_type_strict(path) |> result.unwrap(default_mime_type)
-}
-
-/// Look up a `MimeType` from the last extension component of a path
-/// or filename.
+/// ```gleam
+/// mimetype.filename_to_mime_type(".gitignore")
+/// // -> Error(Nil)
+/// ```
 ///
-/// Returns `Error(EmptyInput)` when the path does not contain a
-/// usable extension (e.g. `"README"`, `".gitignore"`, `""`). Returns
-/// `Error(UnknownExtension(ext))` when the path has an extension but
-/// the normalised extension is not in the database.
-pub fn filename_to_mime_type_strict(
-  path: String,
-) -> Result(MimeType, SimpleDetectionError) {
+pub fn filename_to_mime_type(path: String) -> Result(MimeType, Nil) {
   case lookup_internal.extension_from_filename(path) {
-    Some(extension) -> extension_to_mime_type_strict(extension)
-    None -> Error(EmptyInput)
+    Some(extension) -> extension_to_mime_type(extension)
+    None -> Error(Nil)
   }
 }
 
+/// Returns the known extensions for a MIME type, without dots. The
+/// first one is the usual choice. Parameters are ignored, and an
+/// unknown type gives `[]`.
+///
+/// ## Examples
+///
+/// ```gleam
+/// let assert Ok(jpeg) = mimetype.parse("image/jpeg")
+/// mimetype.mime_type_to_extensions(jpeg)
+/// // -> ["jpg", "jpeg", "jpe"]
+/// ```
+///
+pub fn mime_type_to_extensions(mime: MimeType) -> List(String) {
+  lookup_internal.extensions_for_essence(mime.essence) |> result.unwrap([])
+}
+
 // ---------------------------------------------------------------------------
-// Detection: bytes → MIME
+// Detection from bytes
 // ---------------------------------------------------------------------------
 
-/// Detect a `MimeType` from the leading bytes of a blob.
+/// Detects the MIME type from the first bytes of a file.
 ///
-/// Returns `default_mime_type` (`application/octet-stream`) when the
-/// input carries no recognisable magic bytes — including the empty
-/// `BitArray`. The fallback is silent: a caller that needs to
-/// distinguish "no signature matched" from "signature matched but
-/// produced `application/octet-stream`" should use `detect_strict/1`,
-/// which returns `Error(EmptyInput)` for the zero-byte input and
-/// `Error(NoMatch)` for the no-match case.
-pub fn detect(bytes: BitArray) -> MimeType {
-  detect_with_limit(bytes, default_detection_limit)
+/// Only the first 3072 bytes are read. Input made only of printable
+/// ASCII is reported as `text/plain`. Returns `Error(Nil)` for empty
+/// input and for bytes that match no signature. The supported formats
+/// are listed on the "Supported formats" page.
+///
+/// ## Examples
+///
+/// ```gleam
+/// mimetype.detect(<<0x89, "PNG":utf8, 0x0D, 0x0A, 0x1A, 0x0A>>)
+/// |> result.map(mimetype.to_string)
+/// // -> Ok("image/png")
+/// ```
+///
+/// ```gleam
+/// mimetype.detect(<<0xFF, 0x00, 0xFE>>)
+/// // -> Error(Nil)
+/// ```
+///
+pub fn detect(bytes: BitArray) -> Result(MimeType, Nil) {
+  detect_with(bytes, magic.detect)
 }
 
-/// Detect a `MimeType` from the leading bytes of a blob.
+/// Detects the MIME type like `detect`, but returns `Error(Nil)` for
+/// plain ASCII text instead of `text/plain`.
 ///
-/// Returns `Error(EmptyInput)` for the zero-byte `BitArray`, and
-/// `Error(NoMatch)` when no supported magic-number signature matches
-/// non-empty input. Prefer this variant when the
-/// `application/octet-stream` fallback would be ambiguous; use
-/// `detect/1` when an unconditional `MimeType` is more convenient.
-pub fn detect_strict(
+/// Use it when another hint, such as a file name, should decide what
+/// a text file is.
+///
+/// ## Examples
+///
+/// ```gleam
+/// mimetype.detect_signature_only(<<"a,b\n1,2\n":utf8>>)
+/// // -> Error(Nil)
+/// ```
+///
+pub fn detect_signature_only(bytes: BitArray) -> Result(MimeType, Nil) {
+  detect_with(bytes, magic.detect_signature)
+}
+
+fn detect_with(
   bytes: BitArray,
-) -> Result(MimeType, SimpleDetectionError) {
-  detect_with_limit_strict(bytes, default_detection_limit)
+  detector: fn(BitArray) -> option.Option(String),
+) -> Result(MimeType, Nil) {
+  use <- bool.guard(when: bytes == <<>>, return: Error(Nil))
+  let head = case bit_array.byte_size(bytes) > detection_limit {
+    True -> bit_array.slice(bytes, 0, detection_limit) |> result.unwrap(bytes)
+    False -> bytes
+  }
+  head |> detector |> option.to_result(Nil) |> result.map(from_table)
 }
 
-/// Detect a `MimeType` from the leading bytes of a blob, examining
-/// at most `limit` bytes from the start of the input.
+/// Detects the MIME type from bytes and a file extension.
 ///
-/// A non-positive `limit` is treated as zero, in which case no
-/// signature can match and `default_mime_type` is returned. Limits
-/// larger than the input are clamped to the input length.
-pub fn detect_with_limit(bytes: BitArray, limit: Int) -> MimeType {
-  detect_with_limit_strict(bytes, limit) |> result.unwrap(default_mime_type)
-}
-
-/// Detect a `MimeType` from at most `limit` leading bytes.
+/// A binary signature (PNG, ZIP, PDF, ...) or a recognised structure
+/// (JSON, HTML, XML, SVG) wins over the extension. Otherwise the
+/// extension is used when it names a text type (see `is_text`), so CSV
+/// data with a `csv` extension is `text/csv`. An extension that names a
+/// binary type is used only when the bytes do not look like text, so
+/// plain text uploaded as `photo.png` is not reported as an image.
+/// Returns `Error(Nil)` when neither the bytes nor the extension give
+/// a type.
 ///
-/// Strict variant; returns `Error(EmptyInput)` for the zero-byte
-/// `BitArray` and `Error(NoMatch)` when no supported signature
-/// matches within the limit.
-pub fn detect_with_limit_strict(
-  bytes: BitArray,
-  limit: Int,
-) -> Result(MimeType, SimpleDetectionError) {
-  detect_internal.detect_essence_with_limit(bytes, limit)
-  |> result.map(from_internal)
-  |> result.map_error(detect_failure_to_error)
-}
-
-/// Detect a `MimeType` from a genuine binary or structural signature
-/// only.
+/// ## Examples
 ///
-/// Like `detect_strict` but excludes the printable-ASCII heuristic
-/// that otherwise classifies every plain-ASCII payload as
-/// `text/plain`. Returns `Ok(mime_type)` for byte magic numbers (PNG,
-/// JPEG, ZIP, `text/plain; charset=utf-*` BOMs, ...) and structural
-/// sniffs that inspect bytes (JSON, HTML, XML, SVG). Returns
-/// `Error(EmptyInput)` for the zero-byte `BitArray` and
-/// `Error(NoMatch)` for arbitrary printable-ASCII text — letting the
-/// caller defer to a stronger out-of-band hint such as a filename
-/// extension.
-pub fn detect_signature_only(
-  bytes: BitArray,
-) -> Result(MimeType, SimpleDetectionError) {
-  detect_signature_only_with_limit(bytes, default_detection_limit)
-}
-
-/// `detect_signature_only` with an explicit byte budget.
-pub fn detect_signature_only_with_limit(
-  bytes: BitArray,
-  limit: Int,
-) -> Result(MimeType, SimpleDetectionError) {
-  detect_internal.detect_signature_only_with_limit(bytes, limit)
-  |> result.map(from_internal)
-  |> result.map_error(detect_failure_to_error)
-}
-
-/// Detect a `MimeType` by pulling at most `limit` leading bytes
-/// through a caller-supplied reader.
+/// ```gleam
+/// mimetype.detect_with_extension(<<"a,b\n1,2\n":utf8>>, "csv")
+/// |> result.map(mimetype.to_string)
+/// // -> Ok("text/csv")
+/// ```
 ///
-/// The reader is called once with `limit` as the requested byte
-/// count. If the reader returns an error, `default_mime_type` is
-/// returned.
-pub fn detect_reader(read: Reader(read_error), limit: Int) -> MimeType {
-  detect_reader_strict(read, limit) |> result.unwrap(default_mime_type)
-}
-
-/// Detect a `MimeType` by pulling at most `limit` leading bytes
-/// through a caller-supplied reader.
+/// ```gleam
+/// mimetype.detect_with_extension(<<"hello":utf8>>, "png")
+/// |> result.map(mimetype.to_string)
+/// // -> Ok("text/plain")
+/// ```
 ///
-/// Returns `Error(ReaderError(e))` when the reader itself failed, or
-/// `Error(NoMatch)` when the reader produced bytes but no supported
-/// magic-number signature matched within them. The reader's own
-/// error type flows through `ReaderError(_)` unchanged so callers
-/// can render it however they wish.
-pub fn detect_reader_strict(
-  read: Reader(read_error),
-  limit: Int,
-) -> Result(MimeType, DetectionError(read_error)) {
-  detect_internal.detect_essence_via_reader(read, limit)
-  |> result.map(from_internal)
-  |> result.map_error(detect_failure_to_error)
-}
-
-/// Detect a `MimeType` from bytes, consulting an explicit extension
-/// hint when the byte signature alone is not specific enough.
-///
-/// Genuine binary signatures (PNG, JPEG, ZIP, BOM-tagged text, ...)
-/// and structural sniffs (JSON, HTML, XML, SVG) win over the
-/// extension hint. After signatures, the extension hint and the
-/// byte-level printable-ASCII heuristic are reconciled: if the
-/// extension claims a text-treatable type (`is_text/1` returns
-/// `True`) it wins for specificity (`text/csv` beats `text/plain`),
-/// otherwise the byte heuristic wins. The latter rule (#127) prevents
-/// a text payload from being reported as `image/png` just because the
-/// caller passed a `.png` extension — a common shape in upload
-/// pipelines where the extension is attacker-controlled. The
-/// printable-ASCII fallback is still used as a last resort when
-/// neither the byte signature nor the extension is recognisable.
-pub fn detect_with_extension(bytes: BitArray, extension: String) -> MimeType {
-  detect_with_extension_strict(bytes, extension)
-  |> result.unwrap(default_mime_type)
-}
-
-/// Detect a `MimeType` from bytes, consulting an explicit extension
-/// hint when the byte signature alone is not specific enough.
-///
-/// Returns `Error(EmptyInput)` only when both the bytes and the
-/// extension carry no information (zero-byte input *and* an
-/// extension that normalises to empty). Returns `Error(NoMatch)`
-/// when neither the byte signature, the normalised extension, nor
-/// the printable-ASCII fallback succeed.
-pub fn detect_with_extension_strict(
+pub fn detect_with_extension(
   bytes: BitArray,
   extension: String,
-) -> Result(MimeType, SimpleDetectionError) {
-  detect_signature_only(bytes)
-  |> result.lazy_or(fn() {
-    reconcile_extension_and_text(
-      extension_to_mime_type_strict(extension),
-      detect_strict(bytes),
-    )
-  })
+) -> Result(MimeType, Nil) {
+  detect_with_hint(bytes, extension_to_mime_type(extension))
 }
 
-/// Detect a `MimeType` from bytes, consulting the filename extension
-/// when the byte signature alone is not specific enough.
+/// Detects the MIME type from bytes and a file name, with the same
+/// rules as `detect_with_extension`.
 ///
-/// Genuine binary signatures (PNG, JPEG, ZIP, BOM-tagged text, ...)
-/// and structural sniffs (JSON, HTML, XML, SVG) win over the
-/// filename. After signatures, the filename hint and the byte-level
-/// printable-ASCII heuristic are reconciled with the same rule as
-/// `detect_with_extension` (#127): a text-treatable filename type
-/// beats `text/plain` for specificity, but a binary-looking filename
-/// loses to the byte heuristic when the bytes are text-shaped. The
-/// printable-ASCII fallback is still used as a last resort when
-/// neither the byte signature nor the filename's extension is
-/// recognisable.
-pub fn detect_with_filename(bytes: BitArray, filename: String) -> MimeType {
-  detect_with_filename_strict(bytes, filename)
-  |> result.unwrap(default_mime_type)
-}
-
-/// Detect a `MimeType` from bytes, consulting the filename extension
-/// when the byte signature alone is not specific enough.
+/// ## Examples
 ///
-/// Returns `Error(EmptyInput)` when the bytes are empty and the
-/// filename has no usable extension. Returns `Error(NoMatch)` when
-/// neither the byte signature, the filename extension, nor the
-/// printable-ASCII fallback succeed.
-pub fn detect_with_filename_strict(
+/// ```gleam
+/// mimetype.detect_with_filename(<<"# Title\n":utf8>>, "notes.md")
+/// |> result.map(mimetype.to_string)
+/// // -> Ok("text/markdown")
+/// ```
+///
+pub fn detect_with_filename(
   bytes: BitArray,
   filename: String,
-) -> Result(MimeType, SimpleDetectionError) {
-  detect_signature_only(bytes)
-  |> result.lazy_or(fn() {
-    reconcile_extension_and_text(
-      filename_to_mime_type_strict(filename),
-      detect_strict(bytes),
-    )
-  })
+) -> Result(MimeType, Nil) {
+  detect_with_hint(bytes, filename_to_mime_type(filename))
 }
 
-/// Pick between an extension/filename hint and the printable-ASCII
-/// text heuristic.
-///
-/// Both inputs are `Result(MimeType, _)` — when only one succeeds,
-/// that one is returned (or its error). When both succeed they
-/// disagree: the hint says some MIME type, the byte heuristic says
-/// `text/plain`. The hint wins only if it is itself a text-treatable
-/// type (`is_text/1`); otherwise the byte heuristic wins, since
-/// trusting a binary extension on text-shaped bytes would let an
-/// attacker disguise text payloads as images (#127).
-fn reconcile_extension_and_text(
-  by_hint: Result(MimeType, SimpleDetectionError),
-  by_text: Result(MimeType, SimpleDetectionError),
-) -> Result(MimeType, SimpleDetectionError) {
-  case by_hint {
-    // Text-treatable extension wins for specificity (.csv beats
-    // text/plain). Binary-claiming extension on text bytes loses:
-    // prefer the byte heuristic and only fall back to the
-    // extension when the bytes have no text shape either.
+fn detect_with_hint(
+  bytes: BitArray,
+  hint: Result(MimeType, Nil),
+) -> Result(MimeType, Nil) {
+  use <- result.lazy_or(detect_signature_only(bytes))
+  // Without a signature, the bytes can only say "text/plain". A text
+  // hint is more specific, so it wins. A binary hint on text-shaped
+  // bytes is not trusted: the extension usually comes from the user.
+  case hint {
     Ok(hint) ->
       case is_text(hint) {
         True -> Ok(hint)
-        False -> result.lazy_or(by_text, fn() { Ok(hint) })
+        False -> detect(bytes) |> result.or(Ok(hint))
       }
-    // No extension: take whatever the text heuristic produced.
-    _ -> by_text
+    Error(Nil) -> detect(bytes)
   }
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers (facade-only, depend on the opaque MimeType)
-// ---------------------------------------------------------------------------
-
-/// Build a `MimeType` from a string produced by an internal source
-/// (the magic table, the extension DB, ...) that is expected to be
-/// well-formed. Falls back to a single-essence record if `parse/1`
-/// rejects the input — this should only happen if the data tables
-/// drift, in which case returning a `MimeType` with the raw essence
-/// is more useful than panicking at a detection site.
-fn from_internal(s: String) -> MimeType {
-  case parse_internal.parse_string(s) {
-    Ok(#(essence, parameters)) ->
-      MimeType(essence: essence, parameters: parameters)
-    Error(parse_internal.Empty) ->
-      MimeType(essence: s |> string.trim |> string.lowercase, parameters: [])
-    Error(parse_internal.InvalidEssence(_)) ->
-      MimeType(essence: s |> string.trim |> string.lowercase, parameters: [])
-    // Internal sources (the magic table, the extension DB) never
-    // include non-token bytes in parameter names or values; falling
-    // back to the bare essence here is the conservative path if the
-    // data tables ever drift.
-    Error(parse_internal.InvalidParameterName(_)) ->
-      MimeType(essence: s |> string.trim |> string.lowercase, parameters: [])
-    Error(parse_internal.InvalidParameterValue(_, _)) ->
-      MimeType(essence: s |> string.trim |> string.lowercase, parameters: [])
-    // `parse_string` is the lenient parser and never emits this, but the
-    // match must stay exhaustive — fall back to the bare essence too.
-    Error(parse_internal.MalformedParameter(_)) ->
-      MimeType(essence: s |> string.trim |> string.lowercase, parameters: [])
-  }
+/// Detects the character encoding of text.
+///
+/// The checks run in this order: a byte order mark (UTF-8, UTF-16 and
+/// UTF-32), the `encoding` of an XML declaration, an HTML
+/// `<meta charset>` in the first 1024 bytes, and last a scan that gives
+/// `us-ascii` for 7-bit input and `utf-8` for valid UTF-8. Names are
+/// lowercase. Returns `Error(Nil)` for empty input and for anything else,
+/// such as Latin-1 or Shift_JIS text without a declaration.
+///
+/// ## Examples
+///
+/// ```gleam
+/// mimetype.detect_charset(<<"こんにちは":utf8>>)
+/// // -> Ok("utf-8")
+/// ```
+///
+/// ```gleam
+/// mimetype.detect_charset(<<0x48, 0x69, 0xC0, 0x20>>)
+/// // -> Error(Nil)
+/// ```
+///
+pub fn detect_charset(bytes: BitArray) -> Result(String, Nil) {
+  use <- bool.guard(when: bytes == <<>>, return: Error(Nil))
+  charset_internal.detect(bytes)
 }
 
-/// Build a `MimeType` carrying just an essence (no parameters). Used
-/// by `ancestors` to rebuild parent values from the static hierarchy
-/// table, which only stores essences.
-fn from_essence(essence_value: String) -> MimeType {
-  MimeType(essence: essence_value, parameters: [])
-}
-
-/// Translate an `internal/detect` failure into the public
-/// `DetectionError` shape.
-fn detect_failure_to_error(
-  failure: detect_internal.DetectFailure(read_error),
-) -> DetectionError(read_error) {
-  case failure {
-    detect_internal.Empty -> EmptyInput
-    detect_internal.NoSignatureMatch -> NoMatch
-    detect_internal.ReadFailed(e) -> ReaderError(e)
+// Builds a `MimeType` from a string in the extension or signature
+// tables. Those strings are well formed, so the fallback branch is only
+// reached if the generated tables are broken.
+fn from_table(value: String) -> MimeType {
+  case parse_internal.parse_string(value) {
+    Ok(#(essence, parameters)) -> MimeType(essence:, parameters:)
+    Error(parse_internal.Empty)
+    | Error(parse_internal.InvalidEssence(_))
+    | Error(parse_internal.InvalidParameterName(_))
+    | Error(parse_internal.InvalidParameterValue(_, _))
+    | Error(parse_internal.MalformedParameter(_)) ->
+      MimeType(
+        essence: value |> string.trim |> string.lowercase,
+        parameters: [],
+      )
   }
 }

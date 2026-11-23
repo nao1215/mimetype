@@ -14,6 +14,7 @@ import gleam/bit_array
 import gleam/dynamic/decode
 import gleam/json
 import gleam/list
+import gleam/result
 import gleam/string
 import metamon
 import metamon/generator.{type Generator}
@@ -79,7 +80,7 @@ pub fn charset_of_utf8_scan_matches_the_standard_library_test() -> Nil {
       False, Ok(_) -> Ok("utf-8")
       False, Error(Nil) -> Error(Nil)
     }
-    let actual = case mimetype.charset_of(bytes) {
+    let actual = case mimetype.detect_charset(bytes) {
       Ok(charset) -> Ok(charset)
       Error(_) -> Error(Nil)
     }
@@ -135,7 +136,10 @@ pub fn documents_gleam_json_writes_are_detected_as_json_test() -> Nil {
       let text = padding <> json.to_string(document) <> padding
       // The oracle: gleam_json reads it back, so it is valid JSON.
       let assert Ok(_) = json.parse(text, decode.dynamic)
-      mimetype.essence_of(mimetype.detect(bit_array.from_string(text)))
+      mimetype.essence({
+        mimetype.detect(bit_array.from_string(text))
+        |> result.unwrap(mimetype.octet_stream)
+      })
       == "application/json"
     },
   )
@@ -145,7 +149,10 @@ pub fn json_detection_ignores_a_leading_bom_test() -> Nil {
   metamon.forall(container_gen(1), fn(document) {
     let bytes = bit_array.from_string(json.to_string(document))
     list.all([bytes, <<0xEF, 0xBB, 0xBF, bytes:bits>>], fn(b) {
-      mimetype.essence_of(mimetype.detect(b)) == "application/json"
+      mimetype.essence({
+        mimetype.detect(b) |> result.unwrap(mimetype.octet_stream)
+      })
+      == "application/json"
     })
   })
 }

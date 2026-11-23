@@ -1,636 +1,369 @@
-//// RFC 9110 §12.5 content negotiation: parser and selector for the
-//// `Accept`, `Accept-Encoding`, `Accept-Charset`, and `Accept-Language`
-//// header families.
+//// Parses the HTTP `Accept`, `Accept-Encoding`, `Accept-Charset` and
+//// `Accept-Language` headers and picks the offer a client prefers, as
+//// described in RFC 9110 section 12.5.
 ////
-//// The module exposes:
-////   - `parse/1` — turn a raw `Accept` header into a list of
-////     `AcceptItem` values, preserving the client's q-values and any
-////     accept-ext parameters (RFC 9110 §12.5.1).
-////   - `prefer/1` — stable-sort parsed items by `(q desc, specificity
-////     desc, accept-ext count desc)` so callers can iterate in the
-////     order the client most prefers.
-////   - `negotiate/2` — given a parsed client header and a list of
-////     server offers, return the best `MimeType` to serve, or `None`
-////     when no offer is acceptable. Implements the §12.5.1
-////     proactive-negotiation algorithm with the documented essence-only
-////     matching restriction.
-////   - `parse_encoding/1`, `parse_charset/1`, `parse_language/1` and
-////     their companion `prefer_values/1` / `negotiate_value/2`.
+//// ```gleam
+//// import mimetype
+//// import mimetype/accept
+////
+//// pub fn choose(header: String) -> Result(mimetype.MimeType, Nil) {
+////   let assert Ok(html) = mimetype.parse("text/html")
+////   let assert Ok(json) = mimetype.parse("application/json")
+////   case accept.parse(header) {
+////     Ok(items) -> accept.negotiate(items, [html, json])
+////     Error(_) -> Error(Nil)
+////   }
+//// }
+//// ```
 
 import gleam/bool
 import gleam/float
 import gleam/int
 import gleam/list
-import gleam/option.{type Option, None, Some}
-import gleam/order.{type Order, Eq}
+import gleam/order.{type Order}
 import gleam/result
 import gleam/string
 import mimetype.{type MimeType}
 import mimetype/internal/accept as accept_internal
 import mimetype/internal/parse as parse_internal
 
-/// A single media-range entry as it appears on the wire.
-///
-/// - `Specific(mt)` matches a concrete `type/subtype`. Parameter-level
-///   "more-specific" matching per RFC 9110 §12.5.1 is out of scope:
-///   matching looks at the essence only and ignores attached
-///   media-range parameters (other than `q` and accept-ext, which are
-///   carried on `AcceptItem`).
-/// - `TypeWildcard(type_)` matches any subtype within a top-level type
-///   (e.g. `image/*`). The carried `type_` is already lowercased.
-/// - `AnyType` matches any media range (`*/*`).
+/// The media range of one `Accept` entry.
 pub type MediaRange {
+  /// A full `type/subtype`. Only the essence is compared when matching;
+  /// parameters on the range are ignored.
   Specific(MimeType)
+  /// `type/*`. The type is lowercase.
   TypeWildcard(type_: String)
+  /// `*/*`.
   AnyType
 }
 
-/// One parsed entry from an `Accept` header. `q` defaults to `1.0` if
-/// the wire form omits it; `extensions` holds the accept-ext name/value
-/// pairs that appeared *after* the `q=` parameter, with names
-/// lowercased and values preserved.
+/// One entry of an `Accept` header.
 pub type AcceptItem {
-  AcceptItem(range: MediaRange, q: Float, extensions: List(#(String, String)))
+  AcceptItem(
+    range: MediaRange,
+    /// The `q` weight, from 0.0 to 1.0. It is 1.0 when the entry has
+    /// none.
+    quality: Float,
+    /// The parameters after `q`, with lowercase names. A parameter
+    /// without `=` has the value `""`.
+    extensions: List(#(String, String)),
+  )
 }
 
-/// One parsed entry from `Accept-Encoding`, `Accept-Charset`, or
-/// `Accept-Language`. The `value` is lowercased.
+/// One entry of an `Accept-Encoding`, `Accept-Charset` or
+/// `Accept-Language` header.
 pub type ValueItem {
-  ValueItem(value: String, q: Float)
+  /// `value` is lowercase, and `quality` is the `q` weight (1.0 when
+  /// absent).
+  ValueItem(value: String, quality: Float)
 }
 
-/// Why a header could not be parsed.
+/// The reason a header could not be parsed.
 pub type AcceptError {
-  /// An entry did not match the expected `media-range[;params]` shape.
-  /// `at` is the zero-based entry index; `raw` is the raw entry text.
-  Malformed(at: Int, raw: String)
-  /// An entry's q-value was syntactically invalid.
+  /// The `q` value of an entry is not a number from 0 to 1 with at most
+  /// three decimals. Holds the entry.
   InvalidQValue(raw: String)
-  /// A media-range field was not a wildcard, a `type/*` form, or a
-  /// valid `type/subtype` per RFC 6838.
+  /// The media range is not `*/*`, `type/*` or a valid `type/subtype`.
   InvalidMediaRange(raw: String)
 }
 
 // ---------------------------------------------------------------------------
-// Accept header
+// Accept
 // ---------------------------------------------------------------------------
 
-/// Parse an `Accept` header into a list of `AcceptItem` values in the
-/// order they appeared on the wire. Use `prefer/1` afterwards to sort
-/// by preference.
+/// Parses an `Accept` header into its entries, in header order.
 ///
-/// Whitespace tolerance: empty entries (`"a, , b"`) and surrounding
-/// whitespace on each entry / parameter are accepted per RFC 9110
-/// §5.6.3.
+/// Empty entries and the whitespace around entries and parameters are
+/// ignored, and an empty header gives `Ok([])`.
+///
+/// ## Examples
+///
+/// ```gleam
+/// accept.parse("text/html, */*;q=0.1")
+/// // -> Ok([
+/// //   AcceptItem(Specific(html), quality: 1.0, extensions: []),
+/// //   AcceptItem(AnyType, quality: 0.1, extensions: []),
+/// // ])
+/// ```
+///
+/// ```gleam
+/// accept.parse("text/html;q=2")
+/// // -> Error(InvalidQValue("text/html;q=2"))
+/// ```
+///
 pub fn parse(header: String) -> Result(List(AcceptItem), AcceptError) {
-  let trimmed = string.trim(header)
-  use <- bool.guard(when: trimmed == "", return: Ok([]))
-  parse_internal.split_unquoted(trimmed, on: ",")
-  |> list.index_map(fn(entry, i) { #(i, entry) })
-  |> list.filter(fn(pair) {
-    let #(_, raw) = pair
-    string.trim(raw) != ""
-  })
-  |> list.try_map(fn(pair) {
-    let #(i, raw) = pair
-    parse_entry(i, raw)
-  })
+  parse_internal.split_unquoted(header, on: ",")
+  |> list.map(string.trim)
+  |> list.filter(fn(entry) { entry != "" })
+  |> list.try_map(parse_entry)
 }
 
-fn parse_entry(index: Int, raw: String) -> Result(AcceptItem, AcceptError) {
-  let trimmed = string.trim(raw)
-  let segments = parse_internal.split_unquoted(trimmed, on: ";")
-  case segments {
-    [] -> Error(Malformed(at: index, raw: raw))
-    [range_raw, ..params] -> parse_entry_parts(index, raw, range_raw, params)
+fn parse_entry(entry: String) -> Result(AcceptItem, AcceptError) {
+  let #(range, parameters) = case
+    parse_internal.split_unquoted(entry, on: ";")
+  {
+    [range, ..parameters] -> #(string.trim(range), parameters)
+    [] -> #(entry, [])
   }
-}
-
-fn parse_entry_parts(
-  index: Int,
-  raw: String,
-  range_raw: String,
-  params: List(String),
-) -> Result(AcceptItem, AcceptError) {
-  let range_trimmed = string.trim(range_raw)
-  case accept_internal.split_at_q(params) {
-    Error(Nil) -> Error(InvalidQValue(raw: raw))
-    Ok(#(before_q, q, after_q)) ->
-      case parse_media_range(range_trimmed, before_q) {
-        Error(_) -> Error(InvalidMediaRange(raw: range_trimmed))
-        Ok(range) -> finish_entry(index, raw, range, q, after_q)
-      }
-  }
-}
-
-fn finish_entry(
-  index: Int,
-  raw: String,
-  range: MediaRange,
-  q: Float,
-  after_q: List(String),
-) -> Result(AcceptItem, AcceptError) {
-  case parse_extensions(after_q) {
-    Error(Nil) -> Error(Malformed(at: index, raw: raw))
-    Ok(extensions) -> Ok(AcceptItem(range: range, q: q, extensions: extensions))
-  }
+  use #(media_parameters, quality, extensions) <- result.try(
+    accept_internal.split_at_q(parameters)
+    |> result.replace_error(InvalidQValue(raw: entry)),
+  )
+  use range <- result.try(
+    parse_media_range(range, media_parameters)
+    |> result.replace_error(InvalidMediaRange(raw: range)),
+  )
+  Ok(AcceptItem(range:, quality:, extensions: parse_extensions(extensions)))
 }
 
 fn parse_media_range(
-  range_raw: String,
-  media_params: List(String),
+  range: String,
+  parameters: List(String),
 ) -> Result(MediaRange, Nil) {
-  let lower = string.lowercase(range_raw)
-  case lower, media_params {
-    "*/*", [] -> Ok(AnyType)
-    "*/*", _ -> Ok(AnyType)
-    _, _ ->
-      case string.split_once(lower, on: "/") {
-        Error(Nil) -> Error(Nil)
-        Ok(#(_t, "*")) ->
-          case string.split_once(lower, on: "/") {
-            Ok(#(t, _)) ->
-              case t, is_valid_token(t) {
-                "*", _ -> Error(Nil)
-                _, True -> Ok(TypeWildcard(type_: t))
-                _, False -> Error(Nil)
-              }
-            Error(Nil) -> Error(Nil)
-          }
-        Ok(#("*", _)) -> Error(Nil)
-        Ok(_) -> {
-          let wire = case media_params {
-            [] -> range_raw
-            _ ->
-              range_raw
-              <> "; "
-              <> string.join(list.map(media_params, string.trim), "; ")
-          }
-          case mimetype.parse(wire) {
-            Ok(mt) -> Ok(Specific(mt))
-            Error(_) -> Error(Nil)
-          }
-        }
+  case string.split_once(string.lowercase(range), on: "/") {
+    Ok(#("*", "*")) -> Ok(AnyType)
+    Ok(#("*", _)) -> Error(Nil)
+    Ok(#(type_, "*")) ->
+      case parse_internal.is_token(type_) {
+        True -> Ok(TypeWildcard(type_:))
+        False -> Error(Nil)
       }
+    Ok(_) ->
+      [range, ..list.map(parameters, string.trim)]
+      |> string.join("; ")
+      |> mimetype.parse
+      |> result.map(Specific)
+      |> result.replace_error(Nil)
+    Error(Nil) -> Error(Nil)
   }
 }
 
-fn is_valid_token(s: String) -> Bool {
-  parse_internal.is_token(s)
-}
-
-fn parse_extensions(
-  segments: List(String),
-) -> Result(List(#(String, String)), Nil) {
+fn parse_extensions(segments: List(String)) -> List(#(String, String)) {
   segments
-  |> list.try_fold([], fn(acc, seg) {
-    let trimmed = string.trim(seg)
-    case trimmed {
-      "" -> Ok(acc)
-      _ ->
-        case string.split_once(trimmed, on: "=") {
-          Error(Nil) -> {
-            // accept-ext can be a bare token without a value
-            // (RFC 9110 §12.5.1: `parameter = token "=" ( token / quoted-string )`,
-            // but in practice some servers emit bare tokens).
-            // We model the bare form as `name = ""`.
-            let name = trimmed |> string.lowercase
-            Ok([#(name, ""), ..acc])
-          }
-          Ok(#(name, value)) -> {
-            let normalized_name = name |> string.trim |> string.lowercase
-            let normalized_value = value |> string.trim |> strip_quotes
-            Ok([#(normalized_name, normalized_value), ..acc])
-          }
-        }
+  |> list.map(string.trim)
+  |> list.filter(fn(segment) { segment != "" })
+  |> list.map(fn(segment) {
+    case string.split_once(segment, on: "=") {
+      // RFC 9110 requires `name=value`, but some clients send a bare
+      // name. Keep it with an empty value.
+      Error(Nil) -> #(string.lowercase(segment), "")
+      Ok(#(name, value)) -> #(
+        name |> string.trim |> string.lowercase,
+        value |> string.trim |> strip_quotes,
+      )
     }
   })
-  |> result_map_reverse
-}
-
-fn result_map_reverse(r: Result(List(a), e)) -> Result(List(a), e) {
-  case r {
-    Ok(xs) -> Ok(list.reverse(xs))
-    Error(e) -> Error(e)
-  }
 }
 
 fn strip_quotes(value: String) -> String {
-  let is_quoted =
-    string.starts_with(value, "\"") && string.ends_with(value, "\"")
-  use <- bool.guard(when: !is_quoted, return: value)
-  use <- bool.guard(when: string.length(value) < 2, return: value)
-  value |> string.drop_start(1) |> string.drop_end(1)
-}
-
-/// Stable-sort parsed `AcceptItem`s by client preference:
-///   1. q-value descending,
-///   2. specificity descending (concrete > `type/*` > `*/*`),
-///   3. accept-ext count descending (RFC 9110 §12.5.1 tie-breaker).
-pub fn prefer(items: List(AcceptItem)) -> List(AcceptItem) {
-  list.sort(items, compare_accept_items)
-}
-
-fn compare_accept_items(a: AcceptItem, b: AcceptItem) -> Order {
-  // q desc
-  let q_order = float.compare(b.q, a.q)
-  use <- chain(q_order)
-  // specificity desc
-  let s_order = int.compare(specificity(b.range), specificity(a.range))
-  use <- chain(s_order)
-  // ext count desc
-  int.compare(list.length(b.extensions), list.length(a.extensions))
-}
-
-fn chain(primary: Order, fallback: fn() -> Order) -> Order {
-  case primary {
-    Eq -> fallback()
-    other -> other
+  let quoted =
+    string.length(value) >= 2
+    && string.starts_with(value, "\"")
+    && string.ends_with(value, "\"")
+  case quoted {
+    True -> value |> string.drop_start(1) |> string.drop_end(1)
+    False -> value
   }
 }
 
-fn specificity(range: MediaRange) -> Int {
-  case range {
+/// Sorts entries from most to least preferred: by `quality`, then
+/// `type/subtype` before `type/*` before `*/*`, then by the number of
+/// extensions. Entries that tie keep their order.
+///
+pub fn prefer(items: List(AcceptItem)) -> List(AcceptItem) {
+  list.sort(items, fn(a, b) { compare_scores(score(b), score(a)) })
+}
+
+type Score {
+  Score(quality: Float, specificity: Int, extensions: Int)
+}
+
+fn score(item: AcceptItem) -> Score {
+  let specificity = case item.range {
     Specific(_) -> 3
     TypeWildcard(_) -> 2
     AnyType -> 1
   }
+  Score(
+    quality: item.quality,
+    specificity:,
+    extensions: list.length(item.extensions),
+  )
 }
 
-/// Pick the best server offer for a parsed `Accept` header. Returns
-/// `None` when no offer is acceptable (e.g. every match has `q=0`, or
-/// `server_offers` is empty).
+fn compare_scores(a: Score, b: Score) -> Order {
+  use <- order.lazy_break_tie(float.compare(a.quality, b.quality))
+  use <- order.lazy_break_tie(int.compare(a.specificity, b.specificity))
+  int.compare(a.extensions, b.extensions)
+}
+
+/// Picks the server offer the client prefers.
 ///
-/// Special case: if every client item is `AnyType` with `q>0`, the
-/// server's first offer wins (server preference). Otherwise each server
-/// offer takes its q-value from the most specific matching client item
-/// (RFC 9110 §12.5.1: `text/html;q=0` excludes text/html even with
-/// `*/*` present). Offers are ranked by `(q, specificity, ext_count)`
-/// of that item, and ties go to the order the offer appears in
-/// `server_offers`.
+/// Each offer takes the quality of the most specific entry that matches
+/// it, so `text/html;q=0` rules out `text/html` even when `*/*` is
+/// present. The offer with the highest quality wins, then the one
+/// matched by the more specific entry, and on a tie the earlier offer.
+/// When the header is empty or only has `*/*`, the first offer wins.
+/// Only the essence of each offer is compared.
 ///
-/// Matching is essence-only: parameter-level "more-specific" matching
-/// per RFC 9110 §12.5.1 is out of scope.
+/// Returns `Error(Nil)` when no offer is acceptable.
+///
+/// ## Examples
+///
+/// ```gleam
+/// let assert Ok(items) = accept.parse("text/html, application/json;q=0.9")
+/// let assert Ok(html) = mimetype.parse("text/html")
+/// let assert Ok(json) = mimetype.parse("application/json")
+/// accept.negotiate(items, [json, html])
+/// // -> Ok(html)
+/// ```
+///
+/// ```gleam
+/// let assert Ok(items) = accept.parse("image/*")
+/// accept.negotiate(items, [json, html])
+/// // -> Error(Nil)
+/// ```
+///
 pub fn negotiate(
-  client_accepts client: List(AcceptItem),
-  server_offers offers: List(MimeType),
-) -> Option(MimeType) {
-  case offers {
-    [] -> None
-    _ ->
-      case client {
-        [] -> first(offers)
-        _ ->
-          case all_any_type(client) {
-            True -> first(offers)
-            False -> best_server_match(client, offers)
-          }
-      }
-  }
-}
-
-fn first(offers: List(MimeType)) -> Option(MimeType) {
-  case offers {
-    [head, ..] -> Some(head)
-    [] -> None
-  }
-}
-
-fn all_any_type(items: List(AcceptItem)) -> Bool {
-  list.all(items, fn(item) {
-    case item.range, item.q >. 0.0 {
-      AnyType, True -> True
-      _, _ -> False
-    }
-  })
-}
-
-fn best_server_match(
-  client: List(AcceptItem),
-  offers: List(MimeType),
-) -> Option(MimeType) {
-  offers
-  |> list.index_map(fn(offer, i) { #(i, offer, best_match_for(offer, client)) })
-  |> list.filter_map(fn(triple) {
-    let #(i, offer, m) = triple
-    case m {
-      Some(score) -> Ok(#(i, offer, score))
-      None -> Error(Nil)
-    }
-  })
-  |> list.sort(compare_offer_scores)
-  |> list.first
-  |> option.from_result
-  |> option.map(fn(t) {
-    let #(_, offer, _) = t
-    offer
-  })
-}
-
-type MatchScore {
-  MatchScore(q: Float, specificity: Int, ext_count: Int)
-}
-
-fn compare_offer_scores(
-  a: #(Int, MimeType, MatchScore),
-  b: #(Int, MimeType, MatchScore),
-) -> Order {
-  let #(i_a, _, score_a) = a
-  let #(i_b, _, score_b) = b
-  let q_order = float.compare(score_b.q, score_a.q)
-  use <- chain(q_order)
-  let s_order = int.compare(score_b.specificity, score_a.specificity)
-  use <- chain(s_order)
-  let e_order = int.compare(score_b.ext_count, score_a.ext_count)
-  use <- chain(e_order)
-  // server preference: lower index wins
-  int.compare(i_a, i_b)
-}
-
-/// RFC 9110 §12.5.1: of the client items matching `offer`, the most
-/// specific one (concrete > `type/*` > `*/*`, then more accept-ext
-/// parameters) decides the offer's q-value. A broader range never
-/// overrides it, so `text/html;q=0` excludes text/html even when `*/*`
-/// is present. Among equally specific items the highest q is used.
-fn best_match_for(
-  offer: MimeType,
-  client: List(AcceptItem),
-) -> Option(MatchScore) {
-  let offer_essence = mimetype.essence_of(offer)
-  let scores =
-    list.filter_map(client, fn(item) {
-      case range_matches(item.range, offer_essence) {
-        True ->
-          Ok(MatchScore(
-            q: item.q,
-            specificity: specificity(item.range),
-            ext_count: list.length(item.extensions),
-          ))
-        False -> Error(Nil)
-      }
+  client_accepts: List(AcceptItem),
+  server_offers: List(MimeType),
+) -> Result(MimeType, Nil) {
+  let only_any =
+    list.all(client_accepts, fn(item) {
+      item.range == AnyType && item.quality >. 0.0
     })
-  case list.reduce(scores, most_specific) {
-    Ok(score) ->
-      case score.q >. 0.0 {
-        True -> Some(score)
-        False -> None
-      }
-    Error(Nil) -> None
-  }
-}
-
-fn most_specific(a: MatchScore, b: MatchScore) -> MatchScore {
-  let cmp = {
-    use <- chain(int.compare(a.specificity, b.specificity))
-    use <- chain(int.compare(a.ext_count, b.ext_count))
-    float.compare(a.q, b.q)
-  }
-  case cmp {
-    order.Lt -> b
-    _ -> a
-  }
-}
-
-fn range_matches(range: MediaRange, offer_essence: String) -> Bool {
-  case range {
-    AnyType -> True
-    TypeWildcard(type_:) ->
-      case string.split_once(offer_essence, on: "/") {
-        Ok(#(t, _)) -> t == type_
-        Error(Nil) -> False
-      }
-    Specific(mt) -> mimetype.essence_of(mt) == offer_essence
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Encoding / Charset / Language
-// ---------------------------------------------------------------------------
-
-/// Parse an `Accept-Encoding` header.
-pub fn parse_encoding(header: String) -> Result(List(ValueItem), AcceptError) {
-  parse_value_header(header)
-}
-
-/// Parse an `Accept-Charset` header.
-pub fn parse_charset(header: String) -> Result(List(ValueItem), AcceptError) {
-  parse_value_header(header)
-}
-
-/// Parse an `Accept-Language` header.
-pub fn parse_language(header: String) -> Result(List(ValueItem), AcceptError) {
-  parse_value_header(header)
-}
-
-fn parse_value_header(header: String) -> Result(List(ValueItem), AcceptError) {
-  case accept_internal.parse_token_list(header) {
-    Error(Nil) -> Error(InvalidQValue(raw: header))
-    Ok(pairs) ->
-      Ok(
-        list.map(pairs, fn(p) {
-          let #(value, q) = p
-          ValueItem(value: value, q: q)
-        }),
-      )
-  }
-}
-
-/// Stable-sort `ValueItem`s by q-value descending.
-pub fn prefer_values(items: List(ValueItem)) -> List(ValueItem) {
-  list.sort(items, fn(a, b) { float.compare(b.q, a.q) })
-}
-
-/// Pick the best server offer for an `Accept-Encoding` /
-/// `Accept-Charset` / `Accept-Language` header. The `*` wildcard
-/// matches any value not already named explicitly; entries with `q=0`
-/// are excluded.
-pub fn negotiate_value(
-  client_accepts client: List(ValueItem),
-  server_offers offers: List(String),
-) -> Option(String) {
-  case offers {
-    [] -> None
-    _ ->
-      case client {
-        [] ->
-          case offers {
-            [head, ..] -> Some(head)
-            [] -> None
-          }
-        _ -> best_value_match(client, offers)
-      }
-  }
-}
-
-fn best_value_match(
-  client: List(ValueItem),
-  offers: List(String),
-) -> Option(String) {
-  let normalised_offers =
-    list.index_map(offers, fn(offer, i) { #(i, offer, string.lowercase(offer)) })
-  let wildcard_q = find_q(client, "*")
-  normalised_offers
-  |> list.filter_map(fn(triple) {
-    let #(i, original, lower) = triple
-    let explicit_q = find_q(client, lower)
-    let chosen = case explicit_q, wildcard_q {
-      Some(q), _ -> Some(q)
-      None, Some(q) -> Some(q)
-      None, None -> None
-    }
-    case chosen {
-      Some(q) ->
-        case q >. 0.0 {
-          True -> Ok(#(i, original, q))
-          False -> Error(Nil)
-        }
-      None -> Error(Nil)
-    }
+  use <- bool.lazy_guard(when: only_any, return: fn() {
+    list.first(server_offers)
   })
+  server_offers
+  |> list.index_map(fn(offer, index) {
+    best_match(offer, client_accepts)
+    |> result.map(fn(score) { #(index, offer, score) })
+  })
+  |> result.values
   |> list.sort(fn(a, b) {
-    let #(i_a, _, q_a) = a
-    let #(i_b, _, q_b) = b
-    let q_order = float.compare(q_b, q_a)
-    use <- chain(q_order)
-    int.compare(i_a, i_b)
+    use <- order.lazy_break_tie(compare_scores(b.2, a.2))
+    int.compare(a.0, b.0)
   })
   |> list.first
-  |> option.from_result
-  |> option.map(fn(t) {
-    let #(_, original, _) = t
-    original
-  })
+  |> result.map(fn(match) { match.1 })
 }
 
-fn find_q(items: List(ValueItem), value: String) -> Option(Float) {
-  list.find_map(items, fn(item) {
-    case item.value == value {
-      True -> Ok(item.q)
+// Of the entries matching `offer`, the most specific one decides its
+// quality (RFC 9110 section 12.5.1). Among equally specific entries the
+// highest quality is used. A quality of 0 rules the offer out.
+fn best_match(offer: MimeType, client: List(AcceptItem)) -> Result(Score, Nil) {
+  let essence = mimetype.essence(offer)
+  client
+  |> list.filter(fn(item) { range_matches(item.range, essence) })
+  |> list.map(score)
+  |> list.reduce(fn(a, b) {
+    let by_specificity = {
+      use <- order.lazy_break_tie(int.compare(a.specificity, b.specificity))
+      use <- order.lazy_break_tie(int.compare(a.extensions, b.extensions))
+      float.compare(a.quality, b.quality)
+    }
+    case by_specificity {
+      order.Lt -> b
+      order.Eq | order.Gt -> a
+    }
+  })
+  |> result.try(fn(score) {
+    case score.quality >. 0.0 {
+      True -> Ok(score)
       False -> Error(Nil)
     }
   })
-  |> option.from_result
 }
 
-// ---------------------------------------------------------------------------
-// String convenience wrappers (#125)
-// ---------------------------------------------------------------------------
-
-/// Reasons `negotiate_strings` / `negotiate_encoding_strings` /
-/// `negotiate_charset_strings` / `negotiate_language_strings` can
-/// return without a selection.
-pub type NegotiateError {
-  /// The `Accept` header could not be parsed. Carries the underlying
-  /// `AcceptError` so callers routing to a `400 Bad Request` can
-  /// surface the failing offset / shape verbatim.
-  InvalidHeader(reason: AcceptError)
-  /// An offer string was not a valid `type/subtype`. Carries the
-  /// rejected offer so the caller knows which entry to fix.
-  InvalidOffer(raw: String)
-  /// All entries parsed cleanly but no offer was acceptable to the
-  /// client (e.g. every match had `q=0`, or the offer list was
-  /// empty). Maps to `406 Not Acceptable`.
-  NoOverlap
-}
-
-/// Negotiate against a raw `Accept` header and a list of server
-/// offer strings.
-///
-/// Returns the selected offer **verbatim from `offers`** (not the
-/// parsed-and-rendered MimeType), so callers can compare the result
-/// against their own routing table without re-parsing.
-///
-/// `Error(InvalidHeader(_))` lets the caller route a malformed client
-/// header to `400`; `Error(InvalidOffer(_))` lets it route a buggy
-/// server configuration to `500`; `Error(NoOverlap)` maps cleanly to
-/// `406 Not Acceptable`. The previous three-step ceremony
-/// (`accept.parse` → `mimetype.parse` × n → `negotiate` → render)
-/// collapses into a single call.
-pub fn negotiate_strings(
-  header header: String,
-  offers offers: List(String),
-) -> Result(String, NegotiateError) {
-  use parsed <- result.try(parse_header(header))
-  use offer_pairs <- result.try(parse_offers(offers))
-  let offer_mts = list.map(offer_pairs, fn(p) { p.1 })
-  case negotiate(client_accepts: parsed, server_offers: offer_mts) {
-    None -> Error(NoOverlap)
-    Some(selected) -> Ok(lookup_original(offer_pairs, selected))
+fn range_matches(range: MediaRange, essence: String) -> Bool {
+  case range {
+    AnyType -> True
+    TypeWildcard(type_:) -> string.starts_with(essence, type_ <> "/")
+    Specific(mime) -> mimetype.essence(mime) == essence
   }
 }
 
-/// Negotiate against a raw `Accept-Encoding` header and a list of
-/// encoding offer strings. Returns the selected encoding **verbatim**
-/// from `offers`.
-pub fn negotiate_encoding_strings(
-  header header: String,
-  offers offers: List(String),
-) -> Result(String, NegotiateError) {
-  negotiate_value_strings(parse_encoding(header), offers)
+// ---------------------------------------------------------------------------
+// Accept-Encoding, Accept-Charset and Accept-Language
+// ---------------------------------------------------------------------------
+
+/// Parses an `Accept-Encoding`, `Accept-Charset` or `Accept-Language`
+/// header into its entries, in header order.
+///
+/// ## Examples
+///
+/// ```gleam
+/// accept.parse_values("gzip, br;q=0.5")
+/// // -> Ok([ValueItem("gzip", quality: 1.0), ValueItem("br", quality: 0.5)])
+/// ```
+///
+/// ```gleam
+/// accept.parse_values("gzip;q=x")
+/// // -> Error(InvalidQValue("gzip;q=x"))
+/// ```
+///
+pub fn parse_values(header: String) -> Result(List(ValueItem), AcceptError) {
+  case accept_internal.parse_token_list(header) {
+    Ok(pairs) ->
+      Ok(
+        list.map(pairs, fn(pair) { ValueItem(value: pair.0, quality: pair.1) }),
+      )
+    Error(Nil) -> Error(InvalidQValue(raw: header))
+  }
 }
 
-/// Negotiate against a raw `Accept-Charset` header and a list of
-/// charset offer strings.
-pub fn negotiate_charset_strings(
-  header header: String,
-  offers offers: List(String),
-) -> Result(String, NegotiateError) {
-  negotiate_value_strings(parse_charset(header), offers)
-}
-
-/// Negotiate against a raw `Accept-Language` header and a list of
-/// language tag offer strings.
-pub fn negotiate_language_strings(
-  header header: String,
-  offers offers: List(String),
-) -> Result(String, NegotiateError) {
-  negotiate_value_strings(parse_language(header), offers)
-}
-
-fn negotiate_value_strings(
-  parsed: Result(List(ValueItem), AcceptError),
-  offers: List(String),
-) -> Result(String, NegotiateError) {
-  use items <- result.try(case parsed {
-    Ok(items) -> Ok(items)
-    Error(e) -> Error(InvalidHeader(reason: e))
+/// Picks the server offer the client prefers from a header parsed with
+/// `parse_values`.
+///
+/// Offers are compared without regard to case. `*` gives its quality to
+/// every offer the header does not name, and a quality of 0 rules an
+/// offer out. On a tie the earlier offer wins, and with an empty header
+/// the first offer wins. The chosen offer is returned as it was given.
+/// Returns `Error(Nil)` when no offer is acceptable.
+///
+/// ## Examples
+///
+/// ```gleam
+/// let assert Ok(items) = accept.parse_values("gzip, br;q=1.0, *;q=0.1")
+/// accept.negotiate_value(items, ["br", "gzip"])
+/// // -> Ok("br")
+/// ```
+///
+pub fn negotiate_value(
+  client_accepts: List(ValueItem),
+  server_offers: List(String),
+) -> Result(String, Nil) {
+  use <- bool.lazy_guard(when: client_accepts == [], return: fn() {
+    list.first(server_offers)
   })
-  case negotiate_value(client_accepts: items, server_offers: offers) {
-    None -> Error(NoOverlap)
-    Some(selected) -> Ok(selected)
-  }
+  let wildcard = quality_of(client_accepts, "*")
+  server_offers
+  |> list.index_map(fn(offer, index) {
+    quality_of(client_accepts, string.lowercase(offer))
+    |> result.or(wildcard)
+    |> result.try(fn(quality) {
+      case quality >. 0.0 {
+        True -> Ok(#(index, offer, quality))
+        False -> Error(Nil)
+      }
+    })
+  })
+  |> result.values
+  |> list.sort(fn(a, b) {
+    use <- order.lazy_break_tie(float.compare(b.2, a.2))
+    int.compare(a.0, b.0)
+  })
+  |> list.first
+  |> result.map(fn(match) { match.1 })
 }
 
-fn parse_header(header: String) -> Result(List(AcceptItem), NegotiateError) {
-  case parse(header) {
-    Ok(items) -> Ok(items)
-    Error(e) -> Error(InvalidHeader(reason: e))
-  }
-}
-
-fn parse_offers(
-  offers: List(String),
-) -> Result(List(#(String, MimeType)), NegotiateError) {
-  list.try_map(offers, fn(raw) {
-    case mimetype.parse(raw) {
-      Ok(mt) -> Ok(#(raw, mt))
-      Error(_) -> Error(InvalidOffer(raw: raw))
+fn quality_of(items: List(ValueItem), value: String) -> Result(Float, Nil) {
+  list.find_map(items, fn(item) {
+    case item.value == value {
+      True -> Ok(item.quality)
+      False -> Error(Nil)
     }
   })
-}
-
-fn lookup_original(
-  pairs: List(#(String, MimeType)),
-  selected: MimeType,
-) -> String {
-  let selected_essence = mimetype.essence_of(selected)
-  case
-    list.find(pairs, fn(p) { mimetype.essence_of(p.1) == selected_essence })
-  {
-    Ok(#(raw, _)) -> raw
-    // The selected MimeType always came from `pairs`, so this branch
-    // is unreachable. Return the rendered form as a defensive fallback
-    // rather than panicking in user code.
-    Error(Nil) -> mimetype.to_string(selected)
-  }
 }

@@ -25,7 +25,7 @@ pub fn is_image_essence(essence: String) -> Bool {
 /// `application/ecmascript`, the SQL family
 /// (`application/sql`, `application/x-sql`), and every RFC 6839 §3.1
 /// `+json` / `+xml` structured-syntax-suffix type. Callers that want a
-/// strictly `text/*` check should use `starts_with(essence_of(mt),
+/// strictly `text/*` check should use `starts_with(essence(mime),
 /// "text/")` directly.
 pub fn is_text_essence(essence: String) -> Bool {
   string.starts_with(essence, "text/")

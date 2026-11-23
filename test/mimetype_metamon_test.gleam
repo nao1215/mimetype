@@ -25,7 +25,7 @@ pub fn parse_then_to_string_round_trip_for_canonical_essences_test() -> Nil {
   )
 }
 
-pub fn essence_of_lowercases_essence_test() -> Nil {
+pub fn essence_lowercases_essence_test() -> Nil {
   metamon.forall(
     generator.element_of(["TEXT/PLAIN", "Image/PNG", "APPLICATION/JSON"]),
     fn(essence) {

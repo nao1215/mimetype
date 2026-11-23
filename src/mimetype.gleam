@@ -21,8 +21,8 @@ import mimetype/internal/predicates as predicates_internal
 /// A MIME type such as `text/html; charset=utf-8`.
 ///
 /// The type and subtype are lowercase, and every parameter has a valid
-/// name and value. `parse` and the lookup and detection functions are
-/// the only ways to make one.
+/// name and value. Values come from `parse`, `octet_stream`, `ancestors`
+/// and the lookup and detection functions.
 pub opaque type MimeType {
   // `essence` is trimmed, lowercased and matches `type/subtype`.
   // Parameter names are lowercased tokens; values hold no control bytes.

@@ -16,7 +16,7 @@ The public API is smaller: every lookup and detection function now returns a `Re
 - `accept.parse_encoding`, `accept.parse_charset` and `accept.parse_language` are replaced by `accept.parse_values`.
 - `accept.negotiate_strings`, `negotiate_encoding_strings`, `negotiate_charset_strings`, `negotiate_language_strings`, `NegotiateError` and `prefer_values` are removed. Parse the header and the offers, then call `negotiate`.
 - The `q` field of `accept.AcceptItem` and `accept.ValueItem` is renamed `quality`.
-- `accept.AcceptError` loses the `Malformed` variant, which no input produced, and `InvalidQValue` holds the entry without its surrounding whitespace.
+- `accept.AcceptError` loses the `Malformed` variant, which no input produced, and the `InvalidQValue` that `parse` returns holds the entry without its surrounding whitespace.
 - The supported-format list moved from the README to the "Supported formats" page on HexDocs.
 
 multipartkit uses `filename_to_mime_type_strict`, `detect_strict` and `essence_of`, and needs updating for this release.

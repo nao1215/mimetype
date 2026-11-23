@@ -1,6 +1,6 @@
 //// Differential tests for detection against independent implementations.
 ////
-//// - `charset_of` falls back to a UTF-8 validity scan. For byte strings
+//// - `detect_charset` falls back to a UTF-8 validity scan. For byte strings
 ////   without a BOM or a markup declaration it must say `us-ascii` exactly
 ////   when every byte is below 0x80, `utf-8` exactly when the standard
 ////   library accepts the bytes as UTF-8, and nothing otherwise. The inputs
@@ -73,7 +73,7 @@ fn all_ascii(bytes: BitArray) -> Bool {
   }
 }
 
-pub fn charset_of_utf8_scan_matches_the_standard_library_test() -> Nil {
+pub fn detect_charset_utf8_scan_matches_the_standard_library_test() -> Nil {
   metamon.forall(text_gen(), fn(bytes) {
     let expected = case all_ascii(bytes), bit_array.to_string(bytes) {
       True, _ -> Ok("us-ascii")

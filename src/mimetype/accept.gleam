@@ -62,7 +62,8 @@ pub type ValueItem {
 /// The reason a header could not be parsed.
 pub type AcceptError {
   /// The `q` value of an entry is not a number from 0 to 1 with at most
-  /// three decimals. Holds the entry.
+  /// three decimals. `parse` puts the entry in `raw`; `parse_values`
+  /// puts the whole header.
   InvalidQValue(raw: String)
   /// The media range is not `*/*`, `type/*` or a valid `type/subtype`.
   InvalidMediaRange(raw: String)
@@ -221,6 +222,8 @@ fn compare_scores(a: Score, b: Score) -> Order {
 ///
 /// ```gleam
 /// let assert Ok(items) = accept.parse("image/*")
+/// let assert Ok(html) = mimetype.parse("text/html")
+/// let assert Ok(json) = mimetype.parse("application/json")
 /// accept.negotiate(items, [json, html])
 /// // -> Error(Nil)
 /// ```

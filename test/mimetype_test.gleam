@@ -264,37 +264,37 @@ pub fn mime_type_to_extensions_repeated_lookups_are_consistent_test() {
   })
 }
 
-pub fn essence_of_strips_parameters_and_normalizes_case_test() {
+pub fn essence_strips_parameters_and_normalizes_case_test() {
   mt(" TEXT/HTML ; charset=UTF-8 ")
   |> mimetype.essence
   |> should.equal("text/html")
 }
 
-pub fn parameter_of_matches_case_insensitively_test() {
+pub fn parameter_matches_case_insensitively_test() {
   mt("text/html; CHARSET=UTF-8; boundary=abc123")
   |> mimetype.parameter("charset")
   |> should.equal(Ok("UTF-8"))
 }
 
-pub fn parameter_of_returns_none_for_missing_key_test() {
+pub fn parameter_returns_error_for_missing_key_test() {
   mt("text/html; charset=UTF-8")
   |> mimetype.parameter("boundary")
   |> should.equal(Error(Nil))
 }
 
-pub fn parameter_of_returns_none_for_blank_key_test() {
+pub fn parameter_returns_error_for_blank_key_test() {
   mt("text/html; charset=UTF-8")
   |> mimetype.parameter("")
   |> should.equal(Error(Nil))
 }
 
-pub fn charset_of_type_returns_lowercased_value_test() {
+pub fn charset_returns_lowercased_value_test() {
   mt("text/html; CHARSET=UTF-8")
   |> mimetype.charset
   |> should.equal(Ok("utf-8"))
 }
 
-pub fn charset_of_type_returns_none_when_missing_test() {
+pub fn charset_returns_error_when_missing_test() {
   mt("text/html")
   |> mimetype.charset
   |> should.equal(Error(Nil))
@@ -302,22 +302,22 @@ pub fn charset_of_type_returns_none_when_missing_test() {
 
 // #126: an empty parameter value (`charset=` with no token after `=`) is
 // not a valid `parameter-value` per the RFC grammar — both `token` and
-// `quoted-string` require at least one octet. Collapse it to `None` so
+// `quoted-string` require at least one octet. Collapse it to `Error(Nil)` so
 // the `Option(String)` contract ("present means meaningful") holds.
 
-pub fn parameter_of_returns_none_for_empty_value_test() {
+pub fn parameter_returns_error_for_empty_value_test() {
   mt("text/plain; charset=")
   |> mimetype.parameter("charset")
   |> should.equal(Error(Nil))
 }
 
-pub fn charset_of_type_returns_none_for_empty_value_test() {
+pub fn charset_returns_error_for_empty_value_test() {
   mt("text/plain; charset=")
   |> mimetype.charset
   |> should.equal(Error(Nil))
 }
 
-pub fn parameter_of_returns_none_for_empty_quoted_value_test() {
+pub fn parameter_returns_error_for_empty_quoted_value_test() {
   mt("text/plain; charset=\"\"")
   |> mimetype.parameter("charset")
   |> should.equal(Error(Nil))
@@ -327,19 +327,19 @@ pub fn parameter_of_returns_none_for_empty_quoted_value_test() {
 // (DQUOTE qdtext DQUOTE). The surrounding `"` are syntax, not part of
 // the value, so the parser must strip them.
 
-pub fn parameter_of_strips_surrounding_quotes_test() {
+pub fn parameter_strips_surrounding_quotes_test() {
   mt("text/html; charset=\"utf-8\"")
   |> mimetype.parameter("charset")
   |> should.equal(Ok("utf-8"))
 }
 
-pub fn charset_of_type_strips_surrounding_quotes_test() {
+pub fn charset_strips_surrounding_quotes_test() {
   mt("text/html; charset=\"UTF-8\"")
   |> mimetype.charset
   |> should.equal(Ok("utf-8"))
 }
 
-pub fn parameter_of_unescapes_backslash_escapes_in_quoted_value_test() {
+pub fn parameter_unescapes_backslash_escapes_in_quoted_value_test() {
   // RFC 7230 §3.2.6 quoted-pair: `\X` decodes to `X`. So
   // `name="foo\"bar"` decodes to `foo"bar`.
   mt("multipart/form-data; boundary=\"foo\\\"bar\"")
@@ -347,14 +347,14 @@ pub fn parameter_of_unescapes_backslash_escapes_in_quoted_value_test() {
   |> should.equal(Ok("foo\"bar"))
 }
 
-pub fn parameter_of_unescapes_double_backslash_test() {
+pub fn parameter_unescapes_double_backslash_test() {
   // `\\` decodes to a single `\`.
   mt("text/plain; charset=\"a\\\\b\"")
   |> mimetype.parameter("charset")
   |> should.equal(Ok("a\\b"))
 }
 
-pub fn parameter_of_token_value_unchanged_test() {
+pub fn parameter_token_value_unchanged_test() {
   // Token-form (no surrounding quotes) values pass through unchanged.
   mt("text/html; charset=utf-8")
   |> mimetype.parameter("charset")
@@ -416,8 +416,8 @@ pub fn to_string_escapes_inner_backslash_test() {
 pub fn to_string_quotes_empty_parameter_value_test() {
   // Empty value is not a valid token (`1*tchar`), so on serialisation
   // the parameter is emitted as the empty quoted-string `""`. The
-  // round-trip survives, but `parameter_of` collapses the empty value
-  // to `None` per #126 (an empty `parameter-value` is not legal in the
+  // round-trip survives, but `parameter` collapses the empty value
+  // to `Error(Nil)` per #126 (an empty `parameter-value` is not legal in the
   // RFC grammar; `Some(_)` is reserved for meaningful content).
   let assert Ok(mt1) = mimetype.parse("application/json; tag=\"\"")
   let serialised = mimetype.to_string(mt1)
@@ -435,9 +435,9 @@ pub fn to_string_leaves_token_value_unquoted_test() {
   |> should.equal("text/html; charset=utf-8")
 }
 
-pub fn parameter_of_duplicate_name_first_wins_test() {
+pub fn parameter_duplicate_name_first_wins_test() {
   // #94 (a): when the input carries the same parameter name twice,
-  // `parameter_of` returns the FIRST occurrence. Pinned in the
+  // `parameter` returns the FIRST occurrence. Pinned in the
   // docstring; this test guards against a future regression flipping
   // the rule to "last wins" silently.
   let assert Ok(mt) = mimetype.parse("text/plain; charset=utf-8; charset=ascii")
@@ -445,7 +445,7 @@ pub fn parameter_of_duplicate_name_first_wins_test() {
   |> should.equal(Ok("utf-8"))
 }
 
-pub fn parameter_of_lookup_key_case_insensitive_test() {
+pub fn parameter_lookup_key_case_insensitive_test() {
   // #94 (b): the lookup key is lowercased before matching, and stored
   // names are also lowercased at parse time, so a mixed-case key
   // resolves a mixed-case stored name. Value case is preserved.
@@ -454,7 +454,7 @@ pub fn parameter_of_lookup_key_case_insensitive_test() {
   |> should.equal(Ok("UTF-8"))
 }
 
-pub fn parameter_of_strips_surrounding_whitespace_on_value_test() {
+pub fn parameter_strips_surrounding_whitespace_on_value_test() {
   // #94 (c): whitespace AROUND a token value is stripped at parse
   // time. `string.trim` is symmetric, so leading and trailing
   // whitespace are both removed.
@@ -463,7 +463,7 @@ pub fn parameter_of_strips_surrounding_whitespace_on_value_test() {
   |> should.equal(Ok("utf-8"))
 }
 
-pub fn parameter_of_preserves_internal_whitespace_in_quoted_value_test() {
+pub fn parameter_preserves_internal_whitespace_in_quoted_value_test() {
   // #94 (c, continued): whitespace INSIDE a quoted-string is part of
   // the value and must NOT be collapsed or trimmed. This complements
   // the trimming rule above — the two together define what
@@ -473,7 +473,7 @@ pub fn parameter_of_preserves_internal_whitespace_in_quoted_value_test() {
   |> should.equal(Ok("hello world"))
 }
 
-pub fn parameter_of_lone_quote_passes_through_test() {
+pub fn parameter_lone_quote_passes_through_test() {
   // A bare `"` (length 1) is malformed per RFC 7230 — pass through
   // unchanged so the parser stays tolerant.
   mt("text/html; charset=\"")
@@ -481,7 +481,7 @@ pub fn parameter_of_lone_quote_passes_through_test() {
   |> should.equal(Ok("\""))
 }
 
-pub fn parameter_of_unmatched_leading_quote_passes_through_test() {
+pub fn parameter_unmatched_leading_quote_passes_through_test() {
   // `"utf-8` (no trailing `"`) — pass through unchanged.
   mt("text/html; charset=\"utf-8")
   |> mimetype.parameter("charset")
@@ -2272,64 +2272,64 @@ pub fn ancestors_msword_inherits_from_ole_test() {
   |> should.equal(["application/x-ole-storage"])
 }
 
-pub fn charset_of_html_meta_charset_test() {
+pub fn detect_charset_html_meta_charset_test() {
   mimetype.detect_charset(<<
     "<html><head><meta charset=\"utf-8\"></head></html>":utf8,
   >>)
   |> should.equal(Ok("utf-8"))
 }
 
-pub fn charset_of_html_meta_charset_uppercase_test() {
+pub fn detect_charset_html_meta_charset_uppercase_test() {
   mimetype.detect_charset(<<
     "<html><head><meta charset=\"Shift_JIS\"></head></html>":utf8,
   >>)
   |> should.equal(Ok("shift_jis"))
 }
 
-pub fn charset_of_html_http_equiv_content_charset_test() {
+pub fn detect_charset_html_http_equiv_content_charset_test() {
   mimetype.detect_charset(<<
     "<html><head><meta http-equiv=\"Content-Type\" content=\"text/html; charset=Shift_JIS\"></head></html>":utf8,
   >>)
   |> should.equal(Ok("shift_jis"))
 }
 
-pub fn charset_of_xml_encoding_test() {
+pub fn detect_charset_xml_encoding_test() {
   mimetype.detect_charset(<<
     "<?xml version=\"1.0\" encoding=\"UTF-8\"?><root/>":utf8,
   >>)
   |> should.equal(Ok("utf-8"))
 }
 
-pub fn charset_of_utf8_bom_wins_over_meta_test() {
+pub fn detect_charset_utf8_bom_wins_over_meta_test() {
   mimetype.detect_charset(<<
     0xEF, 0xBB, 0xBF, "<html><meta charset=\"latin1\"></html>":utf8,
   >>)
   |> should.equal(Ok("utf-8"))
 }
 
-pub fn charset_of_pure_ascii_test() {
+pub fn detect_charset_pure_ascii_test() {
   mimetype.detect_charset(<<"Hello world\n":utf8>>)
   |> should.equal(Ok("us-ascii"))
 }
 
-pub fn charset_of_valid_utf8_multibyte_test() {
+pub fn detect_charset_valid_utf8_multibyte_test() {
   mimetype.detect_charset(<<"こんにちは":utf8>>)
   |> should.equal(Ok("utf-8"))
 }
 
-pub fn charset_of_html_with_utf8_body_no_meta_test() {
+pub fn detect_charset_html_with_utf8_body_no_meta_test() {
   mimetype.detect_charset(<<"<html><body>こんにちは</body></html>":utf8>>)
   |> should.equal(Ok("utf-8"))
 }
 
-pub fn charset_of_invalid_utf8_returns_no_match_test() {
+pub fn detect_charset_invalid_utf8_returns_no_match_test() {
   // 0xC0 0x20 — invalid UTF-8 (0xC0 is an over-long encoding lead byte that
   // cannot be followed by 0x20 in valid UTF-8).
   mimetype.detect_charset(<<0x48, 0x69, 0xC0, 0x20>>)
   |> should.equal(Error(Nil))
 }
 
-pub fn charset_of_rejects_ill_formed_3_and_4_byte_sequences_test() {
+pub fn detect_charset_rejects_ill_formed_3_and_4_byte_sequences_test() {
   // Unicode Table 3-7: overlong forms, UTF-16 surrogates and code points
   // above U+10FFFF are not UTF-8 even though every byte is in the
   // lead / continuation range.
@@ -2361,12 +2361,12 @@ pub fn charset_of_rejects_ill_formed_3_and_4_byte_sequences_test() {
   })
 }
 
-pub fn charset_of_empty_returns_empty_input_test() {
+pub fn detect_charset_empty_returns_empty_input_test() {
   mimetype.detect_charset(<<>>)
   |> should.equal(Error(Nil))
 }
 
-pub fn charset_of_truncated_meta_does_not_false_positive_test() {
+pub fn detect_charset_truncated_meta_does_not_false_positive_test() {
   // <meta charset="u — incomplete attribute, no closing quote. The
   // quoted-value reader can't find the closing quote, but all-ASCII
   // input still falls through to us-ascii via the UTF-8 fallback.
@@ -2374,22 +2374,22 @@ pub fn charset_of_truncated_meta_does_not_false_positive_test() {
   |> should.equal(Ok("us-ascii"))
 }
 
-pub fn charset_of_utf16_le_bom_test() {
+pub fn detect_charset_utf16_le_bom_test() {
   mimetype.detect_charset(<<0xFF, 0xFE, 0x48, 0x00, 0x69, 0x00>>)
   |> should.equal(Ok("utf-16le"))
 }
 
-pub fn charset_of_utf16_be_bom_test() {
+pub fn detect_charset_utf16_be_bom_test() {
   mimetype.detect_charset(<<0xFE, 0xFF, 0x00, 0x48, 0x00, 0x69>>)
   |> should.equal(Ok("utf-16be"))
 }
 
-pub fn charset_of_utf32_le_bom_test() {
+pub fn detect_charset_utf32_le_bom_test() {
   mimetype.detect_charset(<<0xFF, 0xFE, 0x00, 0x00, 0x48, 0x00, 0x00, 0x00>>)
   |> should.equal(Ok("utf-32le"))
 }
 
-pub fn charset_of_utf32_be_bom_test() {
+pub fn detect_charset_utf32_be_bom_test() {
   mimetype.detect_charset(<<0x00, 0x00, 0xFE, 0xFF, 0x00, 0x00, 0x00, 0x48>>)
   |> should.equal(Ok("utf-32be"))
 }

@@ -4,7 +4,7 @@
 
 ### Removed
 
-- `mimetype.is_zip_based` and `mimetype.is_xml_based`. Use `mimetype.is_a` with `application/zip` or `application/xml`. `text/xml` is now a kind of `application/xml` (RFC 7303 defines it as an alias), so one check covers both.
+- `mimetype.is_zip_based` and `mimetype.is_xml_based`. Use `mimetype.is_a` with `application/zip` or `application/xml`. `text/xml` is now a kind of `application/xml` (RFC 7303 defines it as an alias), so one check covers both. `is_a(mime, text/xml)` is now `False` for `image/svg+xml` and the other `+xml` types, which are kinds of `application/xml`.
 - The `extensions` field of `accept.AcceptItem`. RFC 9110 removed the accept-ext grammar; parameters after `q` now belong to the media range.
 
 Before:
@@ -30,8 +30,9 @@ Detection, extension lookup, `detect_charset` and the `Accept` negotiation were 
 - `mime_type_to_extensions` knows an extension for every type detection reports except `application/x-elf`, `application/x-ole-storage` and `application/zlib`, which have none: `zst`, `ac3`, `awb`, `hdr`, `z`, `a`, `lz4`, `lz`, `sz`, `qoi`, `exr`, `asf`, `flac` and `deb` are new.
 - ISO base media files: the `hevc` and `hevx` brands are `image/heic-sequence` (was `image/heic`), `mif1` is `image/heif`, `msf1` is `image/heif-sequence`, the 3GPP brands are `video/3gpp` and `video/3gpp2`, and `NDAS`, `F4A ` and `F4B ` are `audio/mp4`. All of these used to fall through to `video/mp4`.
 - `accept.negotiate` matches media range parameters (RFC 9110 section 12.5.1): `text/html;level=1` matches only offers with `level=1` and takes precedence over `text/html`, and `prefer` orders `text/plain;format=flowed` before `text/plain`. `charset` values are compared without regard to case.
-- `accept.negotiate_value` matches a range to a tag that starts with it and `-` (RFC 4647 basic filtering, so `en` matches `en-US`), with the longest matching range deciding. `identity` is acceptable unless `identity;q=0` or `*;q=0` rules it out, and an empty header picks `identity` when it is offered (RFC 9110 section 12.5.3).
-- `accept.parse_values` puts the failing entry in `InvalidQValue`, as `parse` does, instead of the whole header.
+- `accept.negotiate_value` matches a primary language subtag (2 to 8 letters) to a tag that starts with it and `-` (RFC 4647 basic filtering, so `en` matches `en-US`), with the longest matching range deciding. `identity` is acceptable unless `identity;q=0` or `*;q=0` rules it out, and an empty header picks `identity` when it is offered (RFC 9110 section 12.5.3).
+- `accept.parse_values` puts the failing entry in `InvalidQValue`, as `parse` does, instead of the whole header, and `InvalidMediaRange` holds the whole entry instead of the range alone. A parameter that is not valid now fails the entry even after `q`, where it used to be skipped as an accept-ext.
+- JSON nested more than 256 levels deep is not reported as JSON.
 
 ### Added
 
@@ -41,11 +42,12 @@ Detection, extension lookup, `detect_charset` and the `Accept` negotiation were 
 
 - `accept.parse` and `accept.parse_values` reject a sign in the fraction of a q-value. `q=0.-1` used to give a quality of -0.01 and `q=0.+5` 0.05.
 - `detect` no longer reports JSON for a JSON value followed by text, such as `[1] first item`.
-- `detect` recognises `<!--` and `<b` as HTML, as WHATWG MIME Sniffing lists them, and requires a tag-terminating byte after each HTML pattern, so the two bytes `<a` are text.
+- `detect` recognises `<b` as HTML, as WHATWG MIME Sniffing lists it, and HTML that starts with a comment (`<!-- -->` followed by an HTML tag). A comment followed by anything else, as in many Markdown files, stays text. Each HTML pattern needs a tag-terminating byte after it, so the two bytes `<a` are text. SVG that starts with a comment is SVG.
+- `detect` no longer reports `application/zlib` for text starting with `x^`; a zlib header needs a binary data byte after it.
 - `detect` no longer reports `image/bmp` for text starting with `BM`, `application/vnd.ms-cab-compressed` for text starting with `MSCF`, or `audio/mpeg` for text starting with `ID3`. The reserved fields of the BMP and CAB headers and the ID3v2 version byte are checked.
 - `detect_charset` finds the XML `encoding` and the `<meta>` charset in documents that are not UTF-8, such as Shift_JIS or Latin-1, which is when the declaration matters. It used to give up when the first 1024 bytes were not valid UTF-8, including when the 1024th byte fell inside a UTF-8 character.
 - `detect_charset` ignores an empty declared charset (it returned `Ok("")`) and a `charset=` outside a `<meta>` tag.
-- `detect_charset` scans 3072 bytes, as `detect` reads, instead of 1024, and accepts a UTF-8 character that the limit cuts in two. Input with a binary data byte, such as UTF-16 without a byte order mark, gives `Error(Nil)` instead of `us-ascii`.
+- `detect_charset` scans 3072 bytes, as `detect` reads, instead of 1024, and accepts a UTF-8 character that the limit cuts in two, also when the caller passes exactly the first 3072 bytes. Input with a binary data byte, such as UTF-16 without a byte order mark, gives `Error(Nil)` instead of `us-ascii`.
 
 ## [0.27.0] - 2026-11-23
 

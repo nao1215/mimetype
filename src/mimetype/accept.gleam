@@ -62,7 +62,8 @@ pub type AcceptError {
   /// The `q` value of an entry is not a number from 0 to 1 with at most
   /// three decimals, or a value entry is empty. Holds the entry.
   InvalidQValue(raw: String)
-  /// The media range is not `*/*`, `type/*` or a valid `type/subtype`.
+  /// The media range is not `*/*`, `type/*` or a valid `type/subtype`,
+  /// or one of its parameters is invalid. Holds the entry.
   InvalidMediaRange(raw: String)
 }
 
@@ -110,7 +111,7 @@ fn parse_entry(entry: String) -> Result(AcceptItem, AcceptError) {
   )
   use range <- result.try(
     parse_media_range(range, parameters)
-    |> result.replace_error(InvalidMediaRange(raw: range)),
+    |> result.replace_error(InvalidMediaRange(raw: entry)),
   )
   Ok(AcceptItem(range:, quality:))
 }
@@ -321,9 +322,11 @@ pub fn parse_values(header: String) -> Result(List(ValueItem), AcceptError) {
 /// `parse_values`.
 ///
 /// Offers are compared without regard to case. An entry matches an
-/// offer equal to it or starting with it and `-`, so `en` matches
-/// `en-US` (RFC 4647 basic filtering); the longest matching entry sets
-/// the quality. `*` gives its quality to every offer no entry matches,
+/// offer equal to it. An entry of 2 to 8 letters, a primary language
+/// subtag, also matches an offer that starts with it and `-`, so `en`
+/// matches `en-US` (RFC 4647 basic filtering) while `iso-2022-jp` does
+/// not match `iso-2022-jp-2`. The longest matching entry sets the
+/// quality. `*` gives its quality to every offer no entry matches,
 /// and a quality of 0 rules an offer out.
 ///
 /// `identity`, the absence of a content coding, is acceptable unless the
@@ -368,13 +371,17 @@ pub fn negotiate_value(
   |> pick
 }
 
-// The longest entry equal to the offer or a prefix of it followed by
-// `-` decides. Without one, `*` does, and without that `identity` is
+// The longest entry equal to the offer, or a primary language subtag
+// that the offer starts with followed by `-`, decides. Without one, `*` does, and without that `identity` is
 // still acceptable as the least preferred choice.
 fn value_score(items: List(ValueItem), offer: String) -> Result(Score, Nil) {
   let matching =
     list.filter_map(items, fn(item) {
-      case item.value == offer || string.starts_with(offer, item.value <> "-") {
+      case
+        item.value == offer
+        || is_primary_language_subtag(item.value)
+        && string.starts_with(offer, item.value <> "-")
+      {
         True ->
           Ok(Score(quality: item.quality, precedence: string.length(item.value)))
         False -> Error(Nil)
@@ -386,4 +393,15 @@ fn value_score(items: List(ValueItem), offer: String) -> Result(Score, Nil) {
     Error(Nil), "identity" -> Ok(Score(quality: 0.001, precedence: 0))
     Error(Nil), _ -> Error(Nil)
   }
+}
+
+// RFC 5646: 2 to 8 ASCII letters. Charset and coding names that share a
+// prefix, such as iso-2022-jp and iso-2022-jp-2, are not language ranges.
+fn is_primary_language_subtag(value: String) -> Bool {
+  let size = string.length(value)
+  size >= 2
+  && size <= 8
+  && list.all(string.to_graphemes(value), fn(letter) {
+    string.contains("abcdefghijklmnopqrstuvwxyz", letter)
+  })
 }

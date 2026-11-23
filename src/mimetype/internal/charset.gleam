@@ -134,9 +134,10 @@ fn ascii_bytes(
 
 // `us-ascii` when every byte is below 0x80, `utf-8` for valid UTF-8.
 // Binary data bytes rule the input out. A character that the scan limit
-// cuts in two counts as valid.
+// cuts in two counts as valid, also when the caller cut the input to
+// 3072 bytes itself.
 fn scan_utf8(bytes: BitArray) -> Result(String, Nil) {
-  let cut = bit_array.byte_size(bytes) > scan_limit
+  let cut = bit_array.byte_size(bytes) >= scan_limit
   let head = bit_array.slice(bytes, 0, scan_limit) |> result.unwrap(bytes)
   case has_binary_data_byte(head), utf8_verdict(head, cut, False) {
     False, Ok(True) -> Ok("utf-8")

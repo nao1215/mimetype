@@ -204,16 +204,14 @@ const signatures = [
   FtypBrand("video/mp4", [""]),
   Check("application/rtf", looks_like_rtf),
   Check("application/json", looks_like_json),
-  Check("text/html", looks_like_html),
+  // SVG first: an SVG file often starts with a comment.
   Check("image/svg+xml", looks_like_svg),
+  Check("text/html", looks_like_html),
   Check("application/xml", looks_like_xml),
   // RFC 1950: CMF 0x78 (deflate, 32K window) and one of the four FLG
-  // bytes that make CMF * 256 + FLG a multiple of 31. Short binary input
-  // that happens to start this way also matches, so it comes last.
-  Bytes("application/zlib", [#(0, <<0x78, 0x01>>)]),
-  Bytes("application/zlib", [#(0, <<0x78, 0x5E>>)]),
-  Bytes("application/zlib", [#(0, <<0x78, 0x9C>>)]),
-  Bytes("application/zlib", [#(0, <<0x78, 0xDA>>)]),
+  // bytes that make CMF * 256 + FLG a multiple of 31. `x^` also starts
+  // ordinary text, so a binary data byte has to follow.
+  Check("application/zlib", looks_like_zlib),
   Bytes("text/plain; charset=utf-32le", [#(0, <<0xFF, 0xFE, 0x00, 0x00>>)]),
   Bytes("text/plain; charset=utf-32be", [#(0, <<0x00, 0x00, 0xFE, 0xFF>>)]),
   Bytes("text/plain; charset=utf-16le", [#(0, <<0xFF, 0xFE>>)]),
@@ -414,8 +412,8 @@ type Json {
   Invalid
 }
 
-// Containers nested deeper than this are accepted without reading
-// further, which keeps the recursion bounded on every target.
+// Containers nested deeper than this are not treated as JSON, which
+// keeps the recursion bounded on every target.
 const json_max_depth = 256
 
 fn looks_like_json(bytes: BitArray) -> Bool {
@@ -450,7 +448,7 @@ fn json_then(result: Json, next: fn(BitArray) -> Json) -> Json {
 }
 
 fn json_value(bytes: BitArray, depth: Int) -> Json {
-  use <- bool.guard(when: depth >= json_max_depth, return: Truncated)
+  use <- bool.guard(when: depth >= json_max_depth, return: Invalid)
   let bytes = json_skip_ws(bytes)
   case bytes {
     <<>> -> Truncated
@@ -567,11 +565,17 @@ const html_patterns = [
   <<"<body":utf8>>,
   <<"<br":utf8>>,
   <<"<p":utf8>>,
-  <<"<!--":utf8>>,
 ]
 
+// WHATWG MIME Sniffing also lists `<!--`. Markdown and other text files
+// often start with a comment, so here a comment counts only when an HTML
+// pattern follows it.
 fn looks_like_html(bytes: BitArray) -> Bool {
   let bytes = trim_text_prefix(bytes)
+  use <- bool.lazy_guard(
+    when: has_bytes_at(bytes, 0, <<"<!--":utf8>>),
+    return: fn() { looks_like_html(skip_past(drop(bytes, 4), <<"-->":utf8>>)) },
+  )
   list.any(html_patterns, fn(pattern) {
     case drop_ascii_case_insensitive(bytes, pattern) {
       Ok(rest) -> is_tag_terminator(rest)
@@ -618,6 +622,15 @@ fn skip_past(bytes: BitArray, literal: BitArray) -> BitArray {
     True, _ -> drop(bytes, bit_array.byte_size(literal))
     False, <<_, rest:bytes>> -> skip_past(rest, literal)
     False, _ -> <<>>
+  }
+}
+
+fn looks_like_zlib(bytes: BitArray) -> Bool {
+  case bytes {
+    <<0x78, flags, _:bits>> ->
+      { flags == 0x01 || flags == 0x5E || flags == 0x9C || flags == 0xDA }
+      && charset.has_binary_data_byte(bytes)
+    _ -> False
   }
 }
 

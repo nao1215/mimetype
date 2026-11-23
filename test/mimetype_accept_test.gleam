@@ -579,3 +579,16 @@ pub fn parse_values_reports_the_failing_entry_test() {
   assert accept.parse_values("gzip, br;q=x")
     == Error(accept.InvalidQValue("br;q=x"))
 }
+
+// Prefix matching applies to primary language subtags only, so charset
+// and coding names that share a prefix stay apart.
+pub fn prefix_match_is_for_primary_language_subtags_test() {
+  assert negotiate_value("iso-2022-jp;q=0, *", ["iso-2022-jp-2"])
+    == Ok("iso-2022-jp-2")
+  assert negotiate_value("zh", ["zh-Hant-TW"]) == Ok("zh-Hant-TW")
+}
+
+pub fn invalid_range_parameter_reports_the_entry_test() {
+  assert accept.parse("text/html;q=0.5;a b=c, */*")
+    == Error(accept.InvalidMediaRange("text/html;q=0.5;a b=c"))
+}

@@ -226,11 +226,11 @@ pub fn zip_walk_stops_at_an_empty_name_test() {
   assert detected(<<empty:bits, manifest:bits>>) == Ok("application/zip")
 }
 
-// Nesting deeper than 256 levels is accepted without reading further.
+// A value nested more than 256 levels deep is not JSON.
 pub fn json_depth_limit_test() {
   let open = fn(count) { bit_array.from_string(string.repeat("[", count)) }
-  assert detected(<<open(256):bits, "x":utf8>>) == Ok("application/json")
-  assert detected(<<open(255):bits, "x":utf8>>) == Ok("text/plain")
+  assert detected(open(256)) == Ok("application/json")
+  assert detected(open(257)) == Ok("text/plain")
 }
 
 // RFC 8259: a number starts with `-` or a digit, and may have an

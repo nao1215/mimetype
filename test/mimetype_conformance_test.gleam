@@ -360,12 +360,12 @@ pub fn invalid_utf8_after_3072_bytes_is_ignored_test() {
 }
 
 // A character that the 3072-byte limit cuts in two is not an error, but
-// one that the input itself ends inside is.
+// one that a shorter input ends inside is.
 pub fn multibyte_character_cut_by_the_limit_test() {
   assert mimetype.detect_charset(<<ascii(3071):bits, "あ":utf8>>) == Ok("utf-8")
   assert mimetype.detect_charset(<<ascii(3070):bits, "あ":utf8>>) == Ok("utf-8")
-  assert mimetype.detect_charset(<<ascii(3071):bits, 0xE3>>) == Error(Nil)
-  assert mimetype.detect_charset(<<ascii(3070):bits, 0xE3, 0x81>>) == Error(Nil)
+  assert mimetype.detect_charset(<<ascii(3070):bits, 0xE3>>) == Error(Nil)
+  assert mimetype.detect_charset(<<ascii(3069):bits, 0xE3, 0x81>>) == Error(Nil)
 }
 
 // UTF-16 without a byte order mark is full of NUL bytes. It is not
@@ -392,9 +392,9 @@ pub fn utf32_and_utf16_byte_order_marks_test() {
 // stack on either target.
 pub fn deeply_nested_json_test() {
   let arrays = bit_array.from_string(string.repeat("[", 3072))
-  assert detected(arrays) == Ok("application/json")
+  assert detected(arrays) == Ok("text/plain")
   let objects = bit_array.from_string(string.repeat("{\"a\":", 700))
-  assert detected(objects) == Ok("application/json")
+  assert detected(objects) == Ok("text/plain")
 }
 
 // ISO/IEC 15444-1 and 18181-2: the 12-byte signature box ends with
@@ -405,4 +405,42 @@ pub fn jpeg2000_signature_box_needs_all_twelve_bytes_test() {
   assert detected(<<0, 0, 0, 0x0C, "JXL ":utf8, box:bits>>) == Ok("image/jxl")
   assert detected(<<0, 0, 0, 0x0C, "jP  ":utf8>>) == Error(Nil)
   assert detected(<<0, 0, 0, 0x0C, "JXL ":utf8, 0, 0, 0, 0>>) == Error(Nil)
+}
+
+// ---------------------------------------------------------------------------
+// Code review findings
+// ---------------------------------------------------------------------------
+
+pub fn svg_after_a_comment_is_svg_test() {
+  assert detected(<<
+      "<!-- Generator: Sketch -->\n<svg xmlns=\"http://www.w3.org/2000/svg\"/>":utf8,
+    >>)
+    == Ok("image/svg+xml")
+}
+
+// A comment is HTML only when an HTML tag follows it.
+pub fn comment_without_an_html_tag_is_text_test() {
+  let readme = <<"<!-- PROJECT LOGO -->\n# Title\n":utf8>>
+  assert detected(readme) == Ok("text/plain")
+  assert mimetype.detect_with_filename(readme, "README.md")
+    |> result.map(mimetype.to_string)
+    == Ok("text/markdown")
+  assert detected(<<"<!-- a --><!-- b -->\n<body>":utf8>>) == Ok("text/html")
+}
+
+// A caller that cuts the input to 3072 bytes itself gets the same answer.
+pub fn input_of_exactly_3072_bytes_counts_as_cut_test() {
+  assert mimetype.detect_charset(<<ascii(3071):bits, 0xE3>>) == Ok("utf-8")
+  assert mimetype.detect_charset(<<ascii(3071):bits, 0xE3, 0x81>>)
+    == Ok("utf-8")
+  assert mimetype.detect_charset(<<ascii(10):bits, 0xE3>>) == Error(Nil)
+}
+
+pub fn x_caret_text_is_not_zlib_test() {
+  assert detected(<<"x^2 + y^2 = r^2\n":utf8>>) == Ok("text/plain")
+}
+
+pub fn json_deeper_than_the_limit_is_not_json_test() {
+  let open = bit_array.from_string(string.repeat("[", 300))
+  assert detected(<<open:bits, " not json at all":utf8>>) == Ok("text/plain")
 }

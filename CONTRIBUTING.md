@@ -103,12 +103,11 @@ is at parity right after release), use the `workflow_dispatch` button.
 
 `mimetype` intentionally splits the problem into two layers:
 
-- `src/mimetype.gleam` is the public-API facade. It defines the
-  opaque `MimeType` value, `ParseError`, `DetectionError`, `Reader`,
-  the lenient/strict default constants, and a thin wrapper for every
-  `pub fn`. The wrappers delegate to the per-domain modules under
-  `src/mimetype/internal/` — one place per concern, one place per
-  edit:
+- `src/mimetype.gleam` is the public API. It defines the opaque
+  `MimeType` value, `ParseError` and the `octet_stream` constant, and
+  each `pub fn` delegates to a module under `src/mimetype/internal/`.
+  `src/mimetype/accept.gleam` holds the `Accept` header parsing and
+  negotiation. The internal modules are:
   - `internal/parse.gleam` — RFC 7230 §3.2.6 / RFC 6838 wire-format
     parsing, serialisation, and quoting. Add new parameter-handling
     rules here.
@@ -118,14 +117,11 @@ is at parity right after release), use the `workflow_dispatch` button.
   - `internal/predicates.gleam` — family predicates (`is_image`,
     `is_text`, ...), `is_a`, and the `ancestors` chain over the
     static hierarchy. Add new family rules here.
-  - `internal/detect.gleam` — byte-signature detection, including
-    the reader-based path. Add new fixed-offset / structural
-    sniffs here.
   - `internal/db.gleam` — Gleam wrapper for the generated extension
     and reverse lookup tables; the data itself lives in the
     per-target FFI files `mimetype_db_ffi.erl` and `db_ffi.mjs`.
-  - `internal/magic.gleam` — pure-Gleam byte-signature signature
-    table that `internal/detect.gleam` consults.
+  - `internal/magic.gleam` — the byte-signature table and structural
+    sniffs behind `detect`. Add new signatures here.
   - `internal/charset.gleam` — BOM, XML prolog, HTML `<meta>`, and
     UTF-8 validity-scan charset detection.
   - `internal/hierarchy.gleam` — static MIME subtype hierarchy

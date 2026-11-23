@@ -85,7 +85,7 @@ pub type AcceptError {
 pub fn parse(header: String) -> Result(List(AcceptItem), AcceptError) {
   let trimmed = string.trim(header)
   use <- bool.guard(when: trimmed == "", return: Ok([]))
-  accept_internal.split_on_unquoted_commas(trimmed)
+  parse_internal.split_unquoted(trimmed, on: ",")
   |> list.index_map(fn(entry, i) { #(i, entry) })
   |> list.filter(fn(pair) {
     let #(_, raw) = pair
@@ -99,7 +99,7 @@ pub fn parse(header: String) -> Result(List(AcceptItem), AcceptError) {
 
 fn parse_entry(index: Int, raw: String) -> Result(AcceptItem, AcceptError) {
   let trimmed = string.trim(raw)
-  let segments = parse_internal.split_on_unquoted_semicolons(trimmed)
+  let segments = parse_internal.split_unquoted(trimmed, on: ";")
   case segments {
     [] -> Error(Malformed(at: index, raw: raw))
     [range_raw, ..params] -> parse_entry_parts(index, raw, range_raw, params)

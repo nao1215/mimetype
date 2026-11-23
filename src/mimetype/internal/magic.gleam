@@ -365,7 +365,7 @@ fn looks_like_rtf(bytes: BitArray) -> Bool {
 }
 
 fn looks_like_json(bytes: BitArray) -> Bool {
-  let stripped = json_strip_bom(bytes)
+  let stripped = strip_utf8_bom(bytes)
   let #(after_ws, budget) = json_skip_ws(stripped, json_sniff_budget)
   case after_ws {
     <<0x7B, rest:bits>> ->
@@ -381,13 +381,6 @@ fn json_finalize(result: JsonResult) -> Bool {
     Valid(_, _) -> True
     Truncated -> True
     Invalid -> False
-  }
-}
-
-fn json_strip_bom(bytes: BitArray) -> BitArray {
-  case bytes {
-    <<0xEF, 0xBB, 0xBF, rest:bits>> -> rest
-    _ -> bytes
   }
 }
 

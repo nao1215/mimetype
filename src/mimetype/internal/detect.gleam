@@ -86,7 +86,7 @@ pub fn detect_essence_via_reader(
 
 /// Slice the first `limit` bytes off `bytes`. Negative limits become 0;
 /// limits larger than the input are clamped down to the input length.
-pub fn truncate_to_limit(bytes: BitArray, limit: Int) -> BitArray {
+fn truncate_to_limit(bytes: BitArray, limit: Int) -> BitArray {
   let size = bit_array.byte_size(bytes)
   let safe_limit = case limit < 0, limit > size {
     True, _ -> 0

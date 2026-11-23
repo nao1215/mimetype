@@ -3,7 +3,6 @@
 //// `mimetype/accept` re-exports the parts callers need.
 ////
 //// Responsibilities:
-////   - Quote-aware splitting on top-level commas.
 ////   - q-value parsing per RFC 9110 §12.5.5
 ////     (`qvalue = ( "0" [ "." 0*3DIGIT ] ) / ( "1" [ "." 0*3("0") ] )`).
 ////   - Splitting a parameter list at the first `q=` parameter so the
@@ -16,38 +15,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
-
-/// Split a header value on top-level `,` characters while keeping
-/// commas that appear inside a quoted-string attached to the
-/// surrounding entry. Backslash escapes inside a quoted-string are
-/// honoured.
-pub fn split_on_unquoted_commas(s: String) -> List(String) {
-  do_split_commas(s, "", [], False, False)
-  |> list.reverse
-}
-
-fn do_split_commas(
-  remaining: String,
-  current: String,
-  acc: List(String),
-  in_quote: Bool,
-  escape: Bool,
-) -> List(String) {
-  case string.pop_grapheme(remaining) {
-    Error(Nil) -> [current, ..acc]
-    Ok(#(g, rest)) ->
-      case escape, g, in_quote {
-        True, _, _ -> do_split_commas(rest, current <> g, acc, in_quote, False)
-        False, "\\", True ->
-          do_split_commas(rest, current <> g, acc, in_quote, True)
-        False, "\"", _ ->
-          do_split_commas(rest, current <> g, acc, !in_quote, False)
-        False, ",", False ->
-          do_split_commas(rest, "", [current, ..acc], False, False)
-        False, _, _ -> do_split_commas(rest, current <> g, acc, in_quote, False)
-      }
-  }
-}
+import mimetype/internal/parse
 
 /// Walk a parameter segment list (already split on `;`) and return
 /// `#(params_before_q, q_value, params_after_q)`. The `q` lookup is
@@ -98,7 +66,7 @@ fn extract_q(segment: String) -> Option(String) {
 /// the `weight` rule). Returns `Error(Nil)` for empty input, values
 /// outside `[0.0, 1.0]`, more than three fractional digits, or any
 /// non-digit character.
-pub fn parse_q_value(raw: String) -> Result(Float, Nil) {
+fn parse_q_value(raw: String) -> Result(Float, Nil) {
   let trimmed = string.trim(raw)
   use <- bool.guard(when: trimmed == "", return: Error(Nil))
   case string.split_once(trimmed, on: ".") {
@@ -155,7 +123,7 @@ fn parse_fraction_with_int(
 pub fn parse_token_list(header: String) -> Result(List(#(String, Float)), Nil) {
   let trimmed = string.trim(header)
   use <- bool.guard(when: trimmed == "", return: Ok([]))
-  split_on_unquoted_commas(trimmed)
+  parse.split_unquoted(trimmed, on: ",")
   |> list.filter_map(fn(entry) {
     case string.trim(entry) {
       "" -> Error(Nil)

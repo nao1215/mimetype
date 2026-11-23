@@ -1,6 +1,6 @@
 #!/bin/sh
 # generate_supported_formats.sh -- Regenerate the supported-format
-# bullet list inside README.md from the MIME type strings declared in
+# bullet list inside doc/supported-formats.md from the MIME type strings declared in
 # src/mimetype/internal/magic.gleam. The generated content sits
 # between the BEGIN_SUPPORTED_FORMATS / END_SUPPORTED_FORMATS HTML
 # comments. Run with --check to verify the file is in sync without
@@ -9,7 +9,7 @@
 set -eu
 
 MAGIC=src/mimetype/internal/magic.gleam
-README=README.md
+README=doc/supported-formats.md
 BEGIN_MARKER="<!-- BEGIN_SUPPORTED_FORMATS -->"
 END_MARKER="<!-- END_SUPPORTED_FORMATS -->"
 
@@ -60,23 +60,21 @@ emit_family() {
 # layout; alphabetical inside each family.
 generate_body() {
   cat <<'INTRO'
-`detect/1` recognises the following MIME types from byte-level
-signatures or structural sniffs near the start of the input. This
-list is generated from `src/mimetype/internal/magic.gleam` by
-`scripts/generate_supported_formats.sh`. Do not edit it by hand;
-re-run `just generate-readme` after adding or removing a signature.
+`mimetype.detect` recognises these MIME types from the first 3072 bytes
+of a file. The list is generated from `src/mimetype/internal/magic.gleam`;
+run `just generate-formats` after adding or removing a signature.
 
 INTRO
-  emit_family application "### Application formats"
-  emit_family audio       "### Audio formats"
-  emit_family font        "### Font formats"
-  emit_family image       "### Image formats"
-  emit_family text        "### Text formats"
-  emit_family video       "### Video formats"
+  emit_family application "## Application formats"
+  emit_family audio       "## Audio formats"
+  emit_family font        "## Font formats"
+  emit_family image       "## Image formats"
+  emit_family text        "## Text formats"
+  emit_family video       "## Video formats"
 }
 
 # Splice the generated body between BEGIN_MARKER and END_MARKER inside
-# README.md, leaving everything else untouched. Uses awk so we don't
+# the target file, leaving everything else untouched. Uses awk so we don't
 # depend on GNU sed's in-place flag.
 splice_into_readme() {
   body=$1
@@ -118,8 +116,8 @@ new_readme=$(splice_into_readme "$body")
 
 if [ "$mode" = "check" ]; then
   if [ "$new_readme" != "$(cat "$README")" ]; then
-    echo "error: README.md is out of date." >&2
-    echo "Re-run 'just generate-readme' and commit the result." >&2
+    echo "error: $README is out of date." >&2
+    echo "Re-run 'just generate-formats' and commit the result." >&2
     exit 1
   fi
   exit 0

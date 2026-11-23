@@ -78,7 +78,7 @@ fn parse_string_with(
 ) -> Result(#(String, List(#(String, String))), ParseFailure) {
   let trimmed = string.trim(input)
   use <- bool.guard(when: trimmed == "", return: Error(Empty))
-  case split_on_unquoted_semicolons(trimmed) {
+  case split_unquoted(trimmed, on: ";") {
     [] -> Error(Empty)
     [head, ..rest] -> {
       let essence_value = head |> string.trim |> string.lowercase
@@ -134,18 +134,18 @@ pub fn is_token(s: String) -> Bool {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/// Split on top-level `;` while keeping `;` characters that appear
-/// inside an RFC 7230 §3.2.6 quoted-string (`"..."`) attached to the
-/// surrounding value. Backslash escapes (`\"`, `\\`, `\;` etc.) within
-/// a quoted-string are honoured so the next character does not toggle
-/// the quote state.
-pub fn split_on_unquoted_semicolons(s: String) -> List(String) {
-  do_split_semis(s, "", [], False, False)
+/// Split on every top-level `separator` (a single grapheme), keeping
+/// separators that sit inside a quoted-string attached to the
+/// surrounding value. A backslash inside a quoted-string escapes the
+/// next grapheme, so `\"` does not end the string.
+pub fn split_unquoted(s: String, on separator: String) -> List(String) {
+  split_unquoted_loop(s, separator, "", [], False, False)
   |> list.reverse
 }
 
-fn do_split_semis(
+fn split_unquoted_loop(
   remaining: String,
+  separator: String,
   current: String,
   acc: List(String),
   in_quote: Bool,
@@ -153,17 +153,21 @@ fn do_split_semis(
 ) -> List(String) {
   case string.pop_grapheme(remaining) {
     Error(Nil) -> [current, ..acc]
-    Ok(#(g, rest)) ->
-      case escape, g, in_quote {
-        True, _, _ -> do_split_semis(rest, current <> g, acc, in_quote, False)
-        False, "\\", True ->
-          do_split_semis(rest, current <> g, acc, in_quote, True)
-        False, "\"", _ ->
-          do_split_semis(rest, current <> g, acc, !in_quote, False)
-        False, ";", False ->
-          do_split_semis(rest, "", [current, ..acc], False, False)
-        False, _, _ -> do_split_semis(rest, current <> g, acc, in_quote, False)
+    Ok(#(g, rest)) -> {
+      let #(current, acc, in_quote, escape) = case escape, g, in_quote {
+        True, _, _ -> #(current <> g, acc, in_quote, False)
+        False, "\\", True -> #(current <> g, acc, in_quote, True)
+        False, "\"", _ -> #(current <> g, acc, !in_quote, False)
+        False, _, False if g == separator -> #(
+          "",
+          [current, ..acc],
+          False,
+          False,
+        )
+        False, _, _ -> #(current <> g, acc, in_quote, False)
       }
+      split_unquoted_loop(rest, separator, current, acc, in_quote, escape)
+    }
   }
 }
 

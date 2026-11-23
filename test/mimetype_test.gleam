@@ -1,6 +1,6 @@
 import gleam/bit_array
 import gleam/list
-import gleam/option.{None, Some}
+
 import gleam/result
 import gleeunit
 import gleeunit/should
@@ -17,20 +17,13 @@ fn mt(s: String) -> mimetype.MimeType {
 
 fn should_detect(bytes, mime_type) {
   mimetype.detect(bytes)
-  |> mimetype.to_string
-  |> should.equal(mime_type)
+  |> result.map(mimetype.to_string)
+  |> should.equal(Ok(mime_type))
 }
 
 fn should_fall_back(bytes) {
   mimetype.detect(bytes)
-  |> mimetype.to_string
-  |> should.equal("application/octet-stream")
-}
-
-fn should_be_mime(value: mimetype.MimeType, expected: String) {
-  value
-  |> mimetype.to_string
-  |> should.equal(expected)
+  |> should.equal(Error(Nil))
 }
 
 fn should_be_ok_mime(result: Result(mimetype.MimeType, e), expected: String) {
@@ -67,7 +60,7 @@ fn stored_mimetype_zip_archive(mime_type: BitArray) -> BitArray {
 
 pub fn extension_to_mime_type_normalizes_input_test() {
   mimetype.extension_to_mime_type(".JSON")
-  |> should_be_mime("application/json")
+  |> should_be_ok_mime("application/json")
 }
 
 // Issue #139: `.mp4` used to resolve to application/mp4 because the
@@ -77,24 +70,24 @@ pub fn extension_to_mime_type_normalizes_input_test() {
 // map for ambiguous extensions.
 pub fn extension_to_mime_type_mp4_test() {
   mimetype.extension_to_mime_type("mp4")
-  |> should_be_mime("video/mp4")
+  |> should_be_ok_mime("video/mp4")
 }
 
 pub fn filename_to_mime_type_mp4_test() {
   mimetype.filename_to_mime_type("a.mp4")
-  |> should_be_mime("video/mp4")
+  |> should_be_ok_mime("video/mp4")
 }
 
 pub fn filename_to_mime_type_mp4_case_insensitive_test() {
   mimetype.filename_to_mime_type("a.MP4")
-  |> should_be_mime("video/mp4")
+  |> should_be_ok_mime("video/mp4")
 }
 
 pub fn extension_to_mime_type_mp4v_test() {
   // mp4v belongs to video/mp4 only — guard against any regression on
   // the disambiguating tiebreak that doesn't touch mp4v's row.
   mimetype.extension_to_mime_type("mp4v")
-  |> should_be_mime("video/mp4")
+  |> should_be_ok_mime("video/mp4")
 }
 
 pub fn extension_to_mime_type_mp4s_unchanged_test() {
@@ -102,7 +95,7 @@ pub fn extension_to_mime_type_mp4s_unchanged_test() {
   // preference map must NOT over-correct and route every mp4* into
   // video/mp4.
   mimetype.extension_to_mime_type("mp4s")
-  |> should_be_mime("application/mp4")
+  |> should_be_ok_mime("application/mp4")
 }
 
 pub fn extension_to_mime_type_m4a_unchanged_test() {
@@ -110,7 +103,7 @@ pub fn extension_to_mime_type_m4a_unchanged_test() {
   // as audio/mp4 — regression-guard against the preference map
   // accidentally widening its reach.
   mimetype.extension_to_mime_type("m4a")
-  |> should_be_mime("audio/mp4")
+  |> should_be_ok_mime("audio/mp4")
 }
 
 // Issue #140: `.mkv` used to resolve to video/matroska because of the
@@ -120,37 +113,37 @@ pub fn extension_to_mime_type_m4a_unchanged_test() {
 // reverse table.
 pub fn extension_to_mime_type_mkv_test() {
   mimetype.extension_to_mime_type("mkv")
-  |> should_be_mime("video/x-matroska")
+  |> should_be_ok_mime("video/x-matroska")
 }
 
 pub fn filename_to_mime_type_mkv_test() {
   mimetype.filename_to_mime_type("x.mkv")
-  |> should_be_mime("video/x-matroska")
+  |> should_be_ok_mime("video/x-matroska")
 }
 
 pub fn extension_to_mime_type_empty_string_falls_back_to_default_test() {
   mimetype.extension_to_mime_type("")
-  |> should_be_mime("application/octet-stream")
+  |> should.equal(Error(Nil))
 }
 
 pub fn extension_to_mime_type_single_dot_falls_back_to_default_test() {
   mimetype.extension_to_mime_type(".")
-  |> should_be_mime("application/octet-stream")
+  |> should.equal(Error(Nil))
 }
 
 pub fn extension_to_mime_type_trims_whitespace_test() {
   mimetype.extension_to_mime_type("  json  ")
-  |> should_be_mime("application/json")
+  |> should_be_ok_mime("application/json")
 }
 
 pub fn extension_to_mime_type_strips_multiple_leading_dots_test() {
   mimetype.extension_to_mime_type("..json")
-  |> should_be_mime("application/json")
+  |> should_be_ok_mime("application/json")
 }
 
 pub fn extension_to_mime_type_falls_back_for_unknown_test() {
   mimetype.extension_to_mime_type("totally-unknown-ext")
-  |> should_be_mime("application/octet-stream")
+  |> should.equal(Error(Nil))
 }
 
 // Override-layer mappings (scripts/extension_overrides.json). These
@@ -159,47 +152,37 @@ pub fn extension_to_mime_type_falls_back_for_unknown_test() {
 // so the override layer adds the canonical extension mappings.
 pub fn extension_to_mime_type_jsonl_override_test() {
   mimetype.extension_to_mime_type("jsonl")
-  |> should_be_mime("application/jsonl")
+  |> should_be_ok_mime("application/jsonl")
 }
 
 pub fn extension_to_mime_type_ndjson_override_test() {
   mimetype.extension_to_mime_type("ndjson")
-  |> should_be_mime("application/x-ndjson")
+  |> should_be_ok_mime("application/x-ndjson")
 }
 
 pub fn extension_to_mime_type_strict_returns_ok_for_known_extension_test() {
-  mimetype.extension_to_mime_type_strict(".JSON")
+  mimetype.extension_to_mime_type(".JSON")
   |> should_be_ok_mime("application/json")
 }
 
 pub fn extension_to_mime_type_strict_returns_error_for_unknown_extension_test() {
-  mimetype.extension_to_mime_type_strict("totally-unknown-ext")
-  |> should.equal(Error(mimetype.UnknownExtension("totally-unknown-ext")))
+  mimetype.extension_to_mime_type("totally-unknown-ext")
+  |> should.equal(Error(Nil))
 }
 
 pub fn extension_to_mime_type_strict_returns_empty_input_for_blank_test() {
-  mimetype.extension_to_mime_type_strict("")
-  |> should.equal(Error(mimetype.EmptyInput))
+  mimetype.extension_to_mime_type("")
+  |> should.equal(Error(Nil))
 }
 
 pub fn extension_to_mime_type_strict_returns_empty_input_for_dot_only_test() {
-  mimetype.extension_to_mime_type_strict(".")
-  |> should.equal(Error(mimetype.EmptyInput))
+  mimetype.extension_to_mime_type(".")
+  |> should.equal(Error(Nil))
 }
 
 pub fn mime_type_to_extensions_returns_all_known_extensions_test() {
   mimetype.mime_type_to_extensions(mt("image/jpeg"))
   |> should.equal(["jpg", "jpeg", "jpe"])
-}
-
-pub fn mime_type_to_extensions_strict_returns_ok_for_known_type_test() {
-  mimetype.mime_type_to_extensions_strict(mt("image/jpeg"))
-  |> should.equal(Ok(["jpg", "jpeg", "jpe"]))
-}
-
-pub fn mime_type_to_extensions_strict_returns_error_for_unknown_type_test() {
-  mimetype.mime_type_to_extensions_strict(mt("application/x-not-real"))
-  |> should.equal(Error(Nil))
 }
 
 pub fn mime_type_to_extensions_empty_string_returns_empty_list_test() {
@@ -233,12 +216,9 @@ pub fn mime_type_to_extensions_mp3_includes_canonical_set_test() {
   list.contains(exts, "mp2") |> should.be_true
 }
 
-pub fn mime_type_to_extensions_strict_mp3_alias_test() {
-  let assert Ok(mp3_exts) =
-    mimetype.mime_type_to_extensions_strict(mt("audio/mp3"))
-  let assert Ok(mpeg_exts) =
-    mimetype.mime_type_to_extensions_strict(mt("audio/mpeg"))
-  mp3_exts |> should.equal(mpeg_exts)
+pub fn mime_type_to_extensions_mp3_alias_test() {
+  mimetype.mime_type_to_extensions(mt("audio/mp3"))
+  |> should.equal(mimetype.mime_type_to_extensions(mt("audio/mpeg")))
 }
 
 pub fn mime_type_to_extensions_trims_whitespace_test() {
@@ -263,11 +243,11 @@ pub fn extension_to_mime_type_repeated_lookups_are_consistent_test() {
   list.repeat(Nil, 200)
   |> list.each(fn(_) {
     mimetype.extension_to_mime_type(".json")
-    |> should_be_mime("application/json")
+    |> should_be_ok_mime("application/json")
     mimetype.extension_to_mime_type(".png")
-    |> should_be_mime("image/png")
+    |> should_be_ok_mime("image/png")
     mimetype.extension_to_mime_type("totally-unknown-ext")
-    |> should_be_mime("application/octet-stream")
+    |> should.equal(Error(Nil))
   })
 }
 
@@ -284,101 +264,101 @@ pub fn mime_type_to_extensions_repeated_lookups_are_consistent_test() {
   })
 }
 
-pub fn essence_of_strips_parameters_and_normalizes_case_test() {
+pub fn essence_strips_parameters_and_normalizes_case_test() {
   mt(" TEXT/HTML ; charset=UTF-8 ")
-  |> mimetype.essence_of
+  |> mimetype.essence
   |> should.equal("text/html")
 }
 
-pub fn parameter_of_matches_case_insensitively_test() {
+pub fn parameter_matches_case_insensitively_test() {
   mt("text/html; CHARSET=UTF-8; boundary=abc123")
-  |> mimetype.parameter_of("charset")
-  |> should.equal(Some("UTF-8"))
+  |> mimetype.parameter("charset")
+  |> should.equal(Ok("UTF-8"))
 }
 
-pub fn parameter_of_returns_none_for_missing_key_test() {
+pub fn parameter_returns_error_for_missing_key_test() {
   mt("text/html; charset=UTF-8")
-  |> mimetype.parameter_of("boundary")
-  |> should.equal(None)
+  |> mimetype.parameter("boundary")
+  |> should.equal(Error(Nil))
 }
 
-pub fn parameter_of_returns_none_for_blank_key_test() {
+pub fn parameter_returns_error_for_blank_key_test() {
   mt("text/html; charset=UTF-8")
-  |> mimetype.parameter_of("")
-  |> should.equal(None)
+  |> mimetype.parameter("")
+  |> should.equal(Error(Nil))
 }
 
-pub fn charset_of_type_returns_lowercased_value_test() {
+pub fn charset_returns_lowercased_value_test() {
   mt("text/html; CHARSET=UTF-8")
-  |> mimetype.charset_of_type
-  |> should.equal(Some("utf-8"))
+  |> mimetype.charset
+  |> should.equal(Ok("utf-8"))
 }
 
-pub fn charset_of_type_returns_none_when_missing_test() {
+pub fn charset_returns_error_when_missing_test() {
   mt("text/html")
-  |> mimetype.charset_of_type
-  |> should.equal(None)
+  |> mimetype.charset
+  |> should.equal(Error(Nil))
 }
 
 // #126: an empty parameter value (`charset=` with no token after `=`) is
 // not a valid `parameter-value` per the RFC grammar — both `token` and
-// `quoted-string` require at least one octet. Collapse it to `None` so
+// `quoted-string` require at least one octet. Collapse it to `Error(Nil)` so
 // the `Option(String)` contract ("present means meaningful") holds.
 
-pub fn parameter_of_returns_none_for_empty_value_test() {
+pub fn parameter_returns_error_for_empty_value_test() {
   mt("text/plain; charset=")
-  |> mimetype.parameter_of("charset")
-  |> should.equal(None)
+  |> mimetype.parameter("charset")
+  |> should.equal(Error(Nil))
 }
 
-pub fn charset_of_type_returns_none_for_empty_value_test() {
+pub fn charset_returns_error_for_empty_value_test() {
   mt("text/plain; charset=")
-  |> mimetype.charset_of_type
-  |> should.equal(None)
+  |> mimetype.charset
+  |> should.equal(Error(Nil))
 }
 
-pub fn parameter_of_returns_none_for_empty_quoted_value_test() {
+pub fn parameter_returns_error_for_empty_quoted_value_test() {
   mt("text/plain; charset=\"\"")
-  |> mimetype.parameter_of("charset")
-  |> should.equal(None)
+  |> mimetype.parameter("charset")
+  |> should.equal(Error(Nil))
 }
 
 // RFC 7230 §3.2.6: parameter values may be expressed as quoted-string
 // (DQUOTE qdtext DQUOTE). The surrounding `"` are syntax, not part of
 // the value, so the parser must strip them.
 
-pub fn parameter_of_strips_surrounding_quotes_test() {
+pub fn parameter_strips_surrounding_quotes_test() {
   mt("text/html; charset=\"utf-8\"")
-  |> mimetype.parameter_of("charset")
-  |> should.equal(Some("utf-8"))
+  |> mimetype.parameter("charset")
+  |> should.equal(Ok("utf-8"))
 }
 
-pub fn charset_of_type_strips_surrounding_quotes_test() {
+pub fn charset_strips_surrounding_quotes_test() {
   mt("text/html; charset=\"UTF-8\"")
-  |> mimetype.charset_of_type
-  |> should.equal(Some("utf-8"))
+  |> mimetype.charset
+  |> should.equal(Ok("utf-8"))
 }
 
-pub fn parameter_of_unescapes_backslash_escapes_in_quoted_value_test() {
+pub fn parameter_unescapes_backslash_escapes_in_quoted_value_test() {
   // RFC 7230 §3.2.6 quoted-pair: `\X` decodes to `X`. So
   // `name="foo\"bar"` decodes to `foo"bar`.
   mt("multipart/form-data; boundary=\"foo\\\"bar\"")
-  |> mimetype.parameter_of("boundary")
-  |> should.equal(Some("foo\"bar"))
+  |> mimetype.parameter("boundary")
+  |> should.equal(Ok("foo\"bar"))
 }
 
-pub fn parameter_of_unescapes_double_backslash_test() {
+pub fn parameter_unescapes_double_backslash_test() {
   // `\\` decodes to a single `\`.
   mt("text/plain; charset=\"a\\\\b\"")
-  |> mimetype.parameter_of("charset")
-  |> should.equal(Some("a\\b"))
+  |> mimetype.parameter("charset")
+  |> should.equal(Ok("a\\b"))
 }
 
-pub fn parameter_of_token_value_unchanged_test() {
+pub fn parameter_token_value_unchanged_test() {
   // Token-form (no surrounding quotes) values pass through unchanged.
   mt("text/html; charset=utf-8")
-  |> mimetype.parameter_of("charset")
-  |> should.equal(Some("utf-8"))
+  |> mimetype.parameter("charset")
+  |> should.equal(Ok("utf-8"))
 }
 
 pub fn parse_then_to_string_then_parse_quoted_value_round_trips_test() {
@@ -389,8 +369,8 @@ pub fn parse_then_to_string_then_parse_quoted_value_round_trips_test() {
   let assert Ok(mt1) = mimetype.parse("text/html; charset=\"utf-8\"")
   let serialised = mimetype.to_string(mt1)
   let assert Ok(mt2) = mimetype.parse(serialised)
-  mimetype.parameter_of(mt2, "charset")
-  |> should.equal(Some("utf-8"))
+  mimetype.parameter(mt2, "charset")
+  |> should.equal(Ok("utf-8"))
 }
 
 pub fn to_string_quotes_value_with_semicolon_test() {
@@ -399,8 +379,8 @@ pub fn to_string_quotes_value_with_semicolon_test() {
   let assert Ok(mt1) = mimetype.parse("application/json; payload=\"a;b\"")
   let serialised = mimetype.to_string(mt1)
   let assert Ok(mt2) = mimetype.parse(serialised)
-  mimetype.parameter_of(mt2, "payload")
-  |> should.equal(Some("a;b"))
+  mimetype.parameter(mt2, "payload")
+  |> should.equal(Ok("a;b"))
 }
 
 pub fn to_string_quotes_value_with_whitespace_test() {
@@ -409,8 +389,8 @@ pub fn to_string_quotes_value_with_whitespace_test() {
   let assert Ok(mt1) = mimetype.parse("application/json; tag=\"hello world\"")
   let serialised = mimetype.to_string(mt1)
   let assert Ok(mt2) = mimetype.parse(serialised)
-  mimetype.parameter_of(mt2, "tag")
-  |> should.equal(Some("hello world"))
+  mimetype.parameter(mt2, "tag")
+  |> should.equal(Ok("hello world"))
 }
 
 pub fn to_string_escapes_inner_quote_test() {
@@ -419,8 +399,8 @@ pub fn to_string_escapes_inner_quote_test() {
   let assert Ok(mt1) = mimetype.parse("application/json; tag=\"a\\\"b\"")
   let serialised = mimetype.to_string(mt1)
   let assert Ok(mt2) = mimetype.parse(serialised)
-  mimetype.parameter_of(mt2, "tag")
-  |> should.equal(Some("a\"b"))
+  mimetype.parameter(mt2, "tag")
+  |> should.equal(Ok("a\"b"))
 }
 
 pub fn to_string_escapes_inner_backslash_test() {
@@ -429,21 +409,21 @@ pub fn to_string_escapes_inner_backslash_test() {
   let assert Ok(mt1) = mimetype.parse("application/json; tag=\"a\\\\b\"")
   let serialised = mimetype.to_string(mt1)
   let assert Ok(mt2) = mimetype.parse(serialised)
-  mimetype.parameter_of(mt2, "tag")
-  |> should.equal(Some("a\\b"))
+  mimetype.parameter(mt2, "tag")
+  |> should.equal(Ok("a\\b"))
 }
 
 pub fn to_string_quotes_empty_parameter_value_test() {
   // Empty value is not a valid token (`1*tchar`), so on serialisation
   // the parameter is emitted as the empty quoted-string `""`. The
-  // round-trip survives, but `parameter_of` collapses the empty value
-  // to `None` per #126 (an empty `parameter-value` is not legal in the
+  // round-trip survives, but `parameter` collapses the empty value
+  // to `Error(Nil)` per #126 (an empty `parameter-value` is not legal in the
   // RFC grammar; `Some(_)` is reserved for meaningful content).
   let assert Ok(mt1) = mimetype.parse("application/json; tag=\"\"")
   let serialised = mimetype.to_string(mt1)
   let assert Ok(mt2) = mimetype.parse(serialised)
-  mimetype.parameter_of(mt2, "tag")
-  |> should.equal(None)
+  mimetype.parameter(mt2, "tag")
+  |> should.equal(Error(Nil))
 }
 
 pub fn to_string_leaves_token_value_unquoted_test() {
@@ -455,57 +435,57 @@ pub fn to_string_leaves_token_value_unquoted_test() {
   |> should.equal("text/html; charset=utf-8")
 }
 
-pub fn parameter_of_duplicate_name_first_wins_test() {
+pub fn parameter_duplicate_name_first_wins_test() {
   // #94 (a): when the input carries the same parameter name twice,
-  // `parameter_of` returns the FIRST occurrence. Pinned in the
+  // `parameter` returns the FIRST occurrence. Pinned in the
   // docstring; this test guards against a future regression flipping
   // the rule to "last wins" silently.
   let assert Ok(mt) = mimetype.parse("text/plain; charset=utf-8; charset=ascii")
-  mimetype.parameter_of(mt, "charset")
-  |> should.equal(Some("utf-8"))
+  mimetype.parameter(mt, "charset")
+  |> should.equal(Ok("utf-8"))
 }
 
-pub fn parameter_of_lookup_key_case_insensitive_test() {
+pub fn parameter_lookup_key_case_insensitive_test() {
   // #94 (b): the lookup key is lowercased before matching, and stored
   // names are also lowercased at parse time, so a mixed-case key
   // resolves a mixed-case stored name. Value case is preserved.
   let assert Ok(mt) = mimetype.parse("text/plain; CHARSET=UTF-8")
-  mimetype.parameter_of(mt, "CharSet")
-  |> should.equal(Some("UTF-8"))
+  mimetype.parameter(mt, "CharSet")
+  |> should.equal(Ok("UTF-8"))
 }
 
-pub fn parameter_of_strips_surrounding_whitespace_on_value_test() {
+pub fn parameter_strips_surrounding_whitespace_on_value_test() {
   // #94 (c): whitespace AROUND a token value is stripped at parse
   // time. `string.trim` is symmetric, so leading and trailing
   // whitespace are both removed.
   let assert Ok(mt) = mimetype.parse("text/plain; charset=  utf-8  ")
-  mimetype.parameter_of(mt, "charset")
-  |> should.equal(Some("utf-8"))
+  mimetype.parameter(mt, "charset")
+  |> should.equal(Ok("utf-8"))
 }
 
-pub fn parameter_of_preserves_internal_whitespace_in_quoted_value_test() {
+pub fn parameter_preserves_internal_whitespace_in_quoted_value_test() {
   // #94 (c, continued): whitespace INSIDE a quoted-string is part of
   // the value and must NOT be collapsed or trimmed. This complements
   // the trimming rule above — the two together define what
   // "surrounding whitespace stripped" means.
   let assert Ok(mt) = mimetype.parse("text/plain; description=\"hello world\"")
-  mimetype.parameter_of(mt, "description")
-  |> should.equal(Some("hello world"))
+  mimetype.parameter(mt, "description")
+  |> should.equal(Ok("hello world"))
 }
 
-pub fn parameter_of_lone_quote_passes_through_test() {
+pub fn parameter_lone_quote_passes_through_test() {
   // A bare `"` (length 1) is malformed per RFC 7230 — pass through
   // unchanged so the parser stays tolerant.
   mt("text/html; charset=\"")
-  |> mimetype.parameter_of("charset")
-  |> should.equal(Some("\""))
+  |> mimetype.parameter("charset")
+  |> should.equal(Ok("\""))
 }
 
-pub fn parameter_of_unmatched_leading_quote_passes_through_test() {
+pub fn parameter_unmatched_leading_quote_passes_through_test() {
   // `"utf-8` (no trailing `"`) — pass through unchanged.
   mt("text/html; charset=\"utf-8")
-  |> mimetype.parameter_of("charset")
-  |> should.equal(Some("\"utf-8"))
+  |> mimetype.parameter("charset")
+  |> should.equal(Ok("\"utf-8"))
 }
 
 pub fn parse_rejects_whitespace_in_type_test() {
@@ -570,8 +550,8 @@ pub fn parse_accepts_htab_inside_quoted_value_test() {
   // round-trip with the tab preserved.
   let assert Ok(mt) = mimetype.parse("text/html; description=\"a\u{0009}b\"")
   mt
-  |> mimetype.parameter_of("description")
-  |> should.equal(Some("a\u{0009}b"))
+  |> mimetype.parameter("description")
+  |> should.equal(Ok("a\u{0009}b"))
 }
 
 pub fn parse_rejects_lf_byte_in_quoted_parameter_value_test() {
@@ -629,8 +609,8 @@ pub fn parse_accepts_token_specials_in_parameter_name_test() {
   let assert Ok(mt) =
     mimetype.parse("application/json; weird!#$%&'*+-.^_`|~=utf-8")
   mt
-  |> mimetype.parameter_of("weird!#$%&'*+-.^_`|~")
-  |> should.equal(Some("utf-8"))
+  |> mimetype.parameter("weird!#$%&'*+-.^_`|~")
+  |> should.equal(Ok("utf-8"))
 }
 
 pub fn parse_first_invalid_parameter_name_short_circuits_test() {
@@ -644,7 +624,7 @@ pub fn parse_accepts_valid_token_essence_test() {
   // Tokens with all the printable-ASCII tchar specials must still pass.
   let assert Ok(mt) = mimetype.parse("application/vnd.api+json")
   mt
-  |> mimetype.essence_of
+  |> mimetype.essence
   |> should.equal("application/vnd.api+json")
 }
 
@@ -652,25 +632,25 @@ pub fn parse_keeps_semicolon_inside_quoted_value_test() {
   let assert Ok(mt) =
     mimetype.parse("application/json; description=\"a; b\"; charset=utf-8")
   mt
-  |> mimetype.parameter_of("description")
-  |> should.equal(Some("a; b"))
+  |> mimetype.parameter("description")
+  |> should.equal(Ok("a; b"))
   mt
-  |> mimetype.parameter_of("charset")
-  |> should.equal(Some("utf-8"))
+  |> mimetype.parameter("charset")
+  |> should.equal(Ok("utf-8"))
 }
 
 pub fn parse_keeps_equals_inside_quoted_value_test() {
   let assert Ok(mt) = mimetype.parse("text/plain; key=\"k=v\"")
   mt
-  |> mimetype.parameter_of("key")
-  |> should.equal(Some("k=v"))
+  |> mimetype.parameter("key")
+  |> should.equal(Ok("k=v"))
 }
 
 pub fn parse_quoted_string_with_escaped_quote_test() {
   let assert Ok(mt) = mimetype.parse("text/plain; key=\"a\\\"b; c\"")
   mt
-  |> mimetype.parameter_of("key")
-  |> should.equal(Some("a\"b; c"))
+  |> mimetype.parameter("key")
+  |> should.equal(Ok("a\"b; c"))
 }
 
 pub fn parse_unquoted_value_split_unchanged_test() {
@@ -679,11 +659,11 @@ pub fn parse_unquoted_value_split_unchanged_test() {
   // quoted-strings.
   let assert Ok(mt) = mimetype.parse("text/html; charset=utf-8; boundary=---")
   mt
-  |> mimetype.parameter_of("charset")
-  |> should.equal(Some("utf-8"))
+  |> mimetype.parameter("charset")
+  |> should.equal(Ok("utf-8"))
   mt
-  |> mimetype.parameter_of("boundary")
-  |> should.equal(Some("---"))
+  |> mimetype.parameter("boundary")
+  |> should.equal(Ok("---"))
 }
 
 pub fn family_predicates_use_essence_test() {
@@ -762,7 +742,10 @@ pub fn is_text_application_octet_stream_returns_false_test() {
 pub fn extension_and_mime_mapping_roundtrip_test() {
   ["json", "png", "jpg", "pdf", "html", "css", "js", "svg", "zip", "mp3"]
   |> list.each(fn(extension) {
-    let mime_type = mimetype.extension_to_mime_type(extension)
+    let mime_type = {
+      mimetype.extension_to_mime_type(extension)
+      |> result.unwrap(mimetype.octet_stream)
+    }
 
     mimetype.mime_type_to_extensions(mime_type)
     |> list.contains(extension)
@@ -772,62 +755,62 @@ pub fn extension_and_mime_mapping_roundtrip_test() {
 
 pub fn filename_to_mime_type_empty_string_falls_back_to_default_test() {
   mimetype.filename_to_mime_type("")
-  |> should_be_mime("application/octet-stream")
+  |> should.equal(Error(Nil))
 }
 
 pub fn filename_to_mime_type_without_extension_falls_back_to_default_test() {
   mimetype.filename_to_mime_type("README")
-  |> should_be_mime("application/octet-stream")
+  |> should.equal(Error(Nil))
 }
 
 pub fn filename_to_mime_type_detects_pdf_test() {
   mimetype.filename_to_mime_type("document.pdf")
-  |> should_be_mime("application/pdf")
+  |> should_be_ok_mime("application/pdf")
 }
 
 pub fn filename_to_mime_type_strict_returns_ok_for_known_filename_test() {
-  mimetype.filename_to_mime_type_strict("document.pdf")
+  mimetype.filename_to_mime_type("document.pdf")
   |> should_be_ok_mime("application/pdf")
 }
 
 pub fn filename_to_mime_type_strict_returns_empty_input_without_extension_test() {
-  mimetype.filename_to_mime_type_strict("README")
-  |> should.equal(Error(mimetype.EmptyInput))
+  mimetype.filename_to_mime_type("README")
+  |> should.equal(Error(Nil))
 }
 
 pub fn filename_to_mime_type_strict_returns_unknown_extension_test() {
-  mimetype.filename_to_mime_type_strict("notes.totally-unknown-ext")
-  |> should.equal(Error(mimetype.UnknownExtension("totally-unknown-ext")))
+  mimetype.filename_to_mime_type("notes.totally-unknown-ext")
+  |> should.equal(Error(Nil))
 }
 
 pub fn filename_to_mime_type_uses_last_extension_test() {
   mimetype.filename_to_mime_type("/tmp/archive.tar.gz")
-  |> should_be_mime("application/gzip")
+  |> should_be_ok_mime("application/gzip")
 }
 
 pub fn filename_to_mime_type_ignores_query_string_test() {
   mimetype.filename_to_mime_type("file.pdf?v=2")
-  |> should_be_mime("application/pdf")
+  |> should_be_ok_mime("application/pdf")
 }
 
 pub fn filename_to_mime_type_ignores_fragment_test() {
   mimetype.filename_to_mime_type("file.pdf#page=5")
-  |> should_be_mime("application/pdf")
+  |> should_be_ok_mime("application/pdf")
 }
 
 pub fn filename_to_mime_type_supports_windows_paths_test() {
   mimetype.filename_to_mime_type("C:\\Users\\file.json")
-  |> should_be_mime("application/json")
+  |> should_be_ok_mime("application/json")
 }
 
 pub fn filename_to_mime_type_trailing_slash_falls_back_to_default_test() {
   mimetype.filename_to_mime_type("/path/to/")
-  |> should_be_mime("application/octet-stream")
+  |> should.equal(Error(Nil))
 }
 
 pub fn filename_to_mime_type_ignores_hidden_file_without_extension_test() {
   mimetype.filename_to_mime_type(".gitignore")
-  |> should_be_mime("application/octet-stream")
+  |> should.equal(Error(Nil))
 }
 
 pub fn detect_png_test() {
@@ -871,16 +854,18 @@ pub fn detect_rtf_version_nine_test() {
 pub fn detect_rtf_must_have_digit_test() {
   // Not RTF — header is missing the version digit. Falls through to
   // the plain-text heuristic.
-  mimetype.detect(<<"{\\rtfX":utf8>>)
-  |> mimetype.essence_of
+  {
+    mimetype.detect(<<"{\\rtfX":utf8>>) |> result.unwrap(mimetype.octet_stream)
+  }
+  |> mimetype.essence
   |> should.not_equal("application/rtf")
 }
 
 pub fn detect_rtf_partial_prefix_is_not_rtf_test() {
   // Five bytes is one short of the version digit; the rule requires
   // at least 6 bytes so we don't accept truncated headers.
-  mimetype.detect(<<"{\\rtf":utf8>>)
-  |> mimetype.essence_of
+  { mimetype.detect(<<"{\\rtf":utf8>>) |> result.unwrap(mimetype.octet_stream) }
+  |> mimetype.essence
   |> should.not_equal("application/rtf")
 }
 
@@ -922,20 +907,20 @@ pub fn detect_sqlite_test() {
 }
 
 pub fn detect_strict_returns_ok_for_known_signature_test() {
-  mimetype.detect_strict(<<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>)
+  mimetype.detect(<<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>)
   |> should_be_ok_mime("image/png")
 }
 
 pub fn detect_strict_returns_empty_input_for_zero_bytes_test() {
-  mimetype.detect_strict(<<>>)
-  |> should.equal(Error(mimetype.EmptyInput))
+  mimetype.detect(<<>>)
+  |> should.equal(Error(Nil))
 }
 
 pub fn detect_strict_returns_no_match_for_unknown_signature_test() {
   // Single 0xFF byte — not empty, but no signature matches and the
   // printable-ASCII fallback rejects it.
-  mimetype.detect_strict(<<0xFF>>)
-  |> should.equal(Error(mimetype.NoMatch))
+  mimetype.detect(<<0xFF>>)
+  |> should.equal(Error(Nil))
 }
 
 pub fn detect_archive_and_compression_formats_test() {
@@ -1215,7 +1200,7 @@ pub fn detect_ole_word_marker_in_non_cfb_no_match_test() {
     0x00, 0x75, 0x00, 0x6D, 0x00, 0x65, 0x00, 0x6E, 0x00, 0x74, 0x00,
   >>
   let bytes = bit_array.concat([non_cfb, marker])
-  mimetype.detect(bytes)
+  { mimetype.detect(bytes) |> result.unwrap(mimetype.octet_stream) }
   |> mimetype.to_string
   |> should.not_equal("application/msword")
 }
@@ -1312,21 +1297,21 @@ pub fn detect_with_extension_prefers_magic_over_conflicting_extension_test() {
     <<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>,
     "txt",
   )
-  |> should_be_mime("image/png")
+  |> should_be_ok_mime("image/png")
 }
 
 pub fn detect_with_extension_falls_back_when_magic_is_unknown_test() {
   mimetype.detect_with_extension(<<1, 2, 3, 4>>, "csv")
-  |> should_be_mime("text/csv")
+  |> should_be_ok_mime("text/csv")
 }
 
 pub fn detect_with_extension_falls_back_to_default_for_unknown_extension_test() {
   mimetype.detect_with_extension(<<1, 2, 3, 4>>, "totally-unknown-ext")
-  |> should_be_mime("application/octet-stream")
+  |> should.equal(Error(Nil))
 }
 
 pub fn detect_with_extension_strict_prefers_magic_over_extension_test() {
-  mimetype.detect_with_extension_strict(
+  mimetype.detect_with_extension(
     <<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>,
     "txt",
   )
@@ -1334,38 +1319,38 @@ pub fn detect_with_extension_strict_prefers_magic_over_extension_test() {
 }
 
 pub fn detect_with_extension_strict_falls_back_to_extension_test() {
-  mimetype.detect_with_extension_strict(<<1, 2, 3, 4>>, "csv")
+  mimetype.detect_with_extension(<<1, 2, 3, 4>>, "csv")
   |> should_be_ok_mime("text/csv")
 }
 
 pub fn detect_with_extension_strict_returns_no_match_when_both_are_unknown_test() {
-  mimetype.detect_with_extension_strict(<<1, 2, 3, 4>>, "totally-unknown-ext")
-  |> should.equal(Error(mimetype.NoMatch))
+  mimetype.detect_with_extension(<<1, 2, 3, 4>>, "totally-unknown-ext")
+  |> should.equal(Error(Nil))
 }
 
 pub fn detect_with_extension_normalizes_leading_dot_and_case_test() {
   mimetype.detect_with_extension(<<1, 2, 3, 4>>, ".JSON")
-  |> should_be_mime("application/json")
+  |> should_be_ok_mime("application/json")
 }
 
 pub fn detect_with_extension_uses_extension_for_empty_bytes_test() {
   mimetype.detect_with_extension(<<>>, "pdf")
-  |> should_be_mime("application/pdf")
+  |> should_be_ok_mime("application/pdf")
 }
 
 pub fn detect_with_filename_falls_back_when_magic_is_unknown_test() {
   mimetype.detect_with_filename(<<1, 2, 3, 4>>, "report.csv")
-  |> should_be_mime("text/csv")
+  |> should_be_ok_mime("text/csv")
 }
 
 pub fn detect_with_filename_strict_falls_back_to_filename_test() {
-  mimetype.detect_with_filename_strict(<<1, 2, 3, 4>>, "report.csv")
+  mimetype.detect_with_filename(<<1, 2, 3, 4>>, "report.csv")
   |> should_be_ok_mime("text/csv")
 }
 
 pub fn detect_with_filename_strict_returns_no_match_when_both_are_unknown_test() {
-  mimetype.detect_with_filename_strict(<<1, 2, 3, 4>>, "README")
-  |> should.equal(Error(mimetype.NoMatch))
+  mimetype.detect_with_filename(<<1, 2, 3, 4>>, "README")
+  |> should.equal(Error(Nil))
 }
 
 pub fn detect_with_filename_prefers_magic_over_extension_test() {
@@ -1373,7 +1358,7 @@ pub fn detect_with_filename_prefers_magic_over_extension_test() {
     <<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>,
     "not-really.txt",
   )
-  |> should_be_mime("image/png")
+  |> should_be_ok_mime("image/png")
 }
 
 // Regression: issue #58 — printable-ASCII content used to be treated
@@ -1384,28 +1369,28 @@ pub fn detect_with_filename_prefers_filename_over_printable_ascii_csv_test() {
     "type,severity,message,occurred_at\nlogin,info,hi,2026-04-28\n":utf8,
   >>
   mimetype.detect_with_filename(bytes, "fixtures.csv")
-  |> should_be_mime("text/csv")
+  |> should_be_ok_mime("text/csv")
 }
 
 pub fn detect_with_filename_prefers_filename_over_printable_ascii_md_test() {
   mimetype.detect_with_filename(<<"# Title\n\nbody\n":utf8>>, "dump.md")
-  |> should_be_mime("text/markdown")
+  |> should_be_ok_mime("text/markdown")
 }
 
 pub fn detect_with_filename_falls_back_to_text_plain_when_filename_unknown_test() {
   // Plain ASCII + filename without a known extension: the
   // printable-ASCII heuristic is still the right last resort.
   mimetype.detect_with_filename(<<"plain text\n":utf8>>, "README")
-  |> should_be_mime("text/plain")
+  |> should_be_ok_mime("text/plain")
 }
 
 pub fn detect_with_extension_prefers_extension_over_printable_ascii_csv_test() {
   mimetype.detect_with_extension(<<"a,b,c\n1,2,3\n":utf8>>, "csv")
-  |> should_be_mime("text/csv")
+  |> should_be_ok_mime("text/csv")
 }
 
 pub fn detect_with_extension_strict_prefers_extension_over_printable_ascii_csv_test() {
-  mimetype.detect_with_extension_strict(<<"a,b,c\n1,2,3\n":utf8>>, "csv")
+  mimetype.detect_with_extension(<<"a,b,c\n1,2,3\n":utf8>>, "csv")
   |> should_be_ok_mime("text/csv")
 }
 
@@ -1418,18 +1403,18 @@ pub fn detect_with_extension_strict_prefers_extension_over_printable_ascii_csv_t
 pub fn detect_with_extension_text_bytes_with_png_ext_returns_text_test() {
   let txt = <<"hello world this is plain text":utf8>>
   mimetype.detect_with_extension(txt, "png")
-  |> should_be_mime("text/plain")
+  |> should_be_ok_mime("text/plain")
 }
 
 pub fn detect_with_extension_text_bytes_with_zip_ext_returns_text_test() {
   let txt = <<"another plain text payload":utf8>>
   mimetype.detect_with_extension(txt, "zip")
-  |> should_be_mime("text/plain")
+  |> should_be_ok_mime("text/plain")
 }
 
 pub fn detect_with_extension_text_bytes_with_jpg_ext_returns_text_test() {
   mimetype.detect_with_extension(<<"hello":utf8>>, "jpg")
-  |> should_be_mime("text/plain")
+  |> should_be_ok_mime("text/plain")
 }
 
 pub fn detect_with_extension_json_bytes_with_png_ext_returns_json_test() {
@@ -1437,13 +1422,13 @@ pub fn detect_with_extension_json_bytes_with_png_ext_returns_json_test() {
   // so the extension is never consulted — JSON wins regardless.
   let json = <<"{\"key\": \"value\"}":utf8>>
   mimetype.detect_with_extension(json, "png")
-  |> should_be_mime("application/json")
+  |> should_be_ok_mime("application/json")
 }
 
 pub fn detect_with_extension_xml_bytes_with_zip_ext_returns_xml_test() {
   let xml = <<"<?xml version=\"1.0\"?>":utf8>>
   mimetype.detect_with_extension(xml, "zip")
-  |> should_be_mime("text/xml")
+  |> should_be_ok_mime("text/xml")
 }
 
 pub fn detect_with_extension_text_bytes_with_csv_ext_still_returns_csv_test() {
@@ -1451,18 +1436,18 @@ pub fn detect_with_extension_text_bytes_with_csv_ext_still_returns_csv_test() {
   // .csv extension is a stronger signal than the printable-ASCII
   // heuristic's "text/plain", so it still wins.
   mimetype.detect_with_extension(<<"plain text payload":utf8>>, "csv")
-  |> should_be_mime("text/csv")
+  |> should_be_ok_mime("text/csv")
 }
 
 pub fn detect_with_filename_text_bytes_with_png_filename_returns_text_test() {
   // Same rule applies to detect_with_filename.
   mimetype.detect_with_filename(<<"hello plain text":utf8>>, "evil.png")
-  |> should_be_mime("text/plain")
+  |> should_be_ok_mime("text/plain")
 }
 
 pub fn detect_with_extension_falls_back_to_text_plain_when_extension_unknown_test() {
   mimetype.detect_with_extension(<<"plain text\n":utf8>>, "totally-unknown-ext")
-  |> should_be_mime("text/plain")
+  |> should_be_ok_mime("text/plain")
 }
 
 pub fn detect_signature_only_returns_ok_for_binary_signature_test() {
@@ -1488,17 +1473,17 @@ pub fn detect_signature_only_returns_no_match_for_printable_ascii_test() {
   // The whole point of this helper: plain printable ASCII is *not*
   // a signature match here.
   mimetype.detect_signature_only(<<"plain text\n":utf8>>)
-  |> should.equal(Error(mimetype.NoMatch))
+  |> should.equal(Error(Nil))
 }
 
 pub fn detect_signature_only_returns_empty_input_for_empty_test() {
   mimetype.detect_signature_only(<<>>)
-  |> should.equal(Error(mimetype.EmptyInput))
+  |> should.equal(Error(Nil))
 }
 
 pub fn detect_signature_only_returns_no_match_for_unknown_binary_test() {
   mimetype.detect_signature_only(<<1, 2, 3, 4>>)
-  |> should.equal(Error(mimetype.NoMatch))
+  |> should.equal(Error(Nil))
 }
 
 pub fn detect_json_empty_object_test() {
@@ -1604,7 +1589,7 @@ pub fn detect_json_rejects_trailing_comma_in_array_test() {
 }
 
 pub fn detect_json_strict_returns_ok_test() {
-  mimetype.detect_strict(<<"{\"x\":1}":utf8>>)
+  mimetype.detect(<<"{\"x\":1}":utf8>>)
   |> should_be_ok_mime("application/json")
 }
 
@@ -1730,12 +1715,12 @@ pub fn detect_xml_rejects_processing_instruction_other_than_xml_test() {
 }
 
 pub fn detect_xml_strict_returns_ok_test() {
-  mimetype.detect_strict(<<"<?xml version=\"1.0\"?>":utf8>>)
+  mimetype.detect(<<"<?xml version=\"1.0\"?>":utf8>>)
   |> should_be_ok_mime("text/xml")
 }
 
 pub fn detect_html_strict_returns_ok_test() {
-  mimetype.detect_strict(<<"<!DOCTYPE html>":utf8>>)
+  mimetype.detect(<<"<!DOCTYPE html>":utf8>>)
   |> should_be_ok_mime("text/html")
 }
 
@@ -1801,7 +1786,7 @@ pub fn detect_svg_xml_prolog_without_svg_falls_back_to_xml_test() {
 }
 
 pub fn detect_svg_strict_returns_ok_test() {
-  mimetype.detect_strict(<<"<svg/>":utf8>>)
+  mimetype.detect(<<"<svg/>":utf8>>)
   |> should_be_ok_mime("image/svg+xml")
 }
 
@@ -1847,7 +1832,7 @@ pub fn detect_eot_strict_returns_ok_test() {
     0x00,
     0x01,
   >>
-  mimetype.detect_strict(bytes)
+  mimetype.detect(bytes)
   |> should_be_ok_mime("application/vnd.ms-fontobject")
 }
 
@@ -1858,7 +1843,7 @@ pub fn detect_eot_rejects_missing_offset_34_magic_test() {
 }
 
 pub fn detect_font_strict_returns_ok_for_ttf_test() {
-  mimetype.detect_strict(<<0x00, 0x01, 0x00, 0x00>>)
+  mimetype.detect(<<0x00, 0x01, 0x00, 0x00>>)
   |> should_be_ok_mime("font/ttf")
 }
 
@@ -1908,7 +1893,7 @@ pub fn detect_fits_test() {
 }
 
 pub fn detect_image_strict_returns_ok_for_psd_test() {
-  mimetype.detect_strict(<<0x38, 0x42, 0x50, 0x53>>)
+  mimetype.detect(<<0x38, 0x42, 0x50, 0x53>>)
   |> should_be_ok_mime("image/vnd.adobe.photoshop")
 }
 
@@ -1964,7 +1949,7 @@ pub fn detect_zlib_does_not_steal_png_test() {
 }
 
 pub fn detect_compression_strict_returns_ok_for_lzip_test() {
-  mimetype.detect_strict(<<"LZIP":utf8>>)
+  mimetype.detect(<<"LZIP":utf8>>)
   |> should_be_ok_mime("application/x-lzip")
 }
 
@@ -2027,7 +2012,7 @@ pub fn detect_ebml_without_doctype_falls_back_test() {
 }
 
 pub fn detect_av_strict_returns_ok_for_amr_test() {
-  mimetype.detect_strict(<<"#!AMR":utf8, 0x0A>>)
+  mimetype.detect(<<"#!AMR":utf8, 0x0A>>)
   |> should_be_ok_mime("audio/amr")
 }
 
@@ -2105,158 +2090,8 @@ pub fn detect_text_plain_does_not_steal_json_test() {
 }
 
 pub fn detect_text_plain_strict_returns_ok_test() {
-  mimetype.detect_strict(<<"plain text":utf8>>)
+  mimetype.detect(<<"plain text":utf8>>)
   |> should_be_ok_mime("text/plain")
-}
-
-pub fn detect_with_limit_png_within_limit_test() {
-  // PNG signature is 8 bytes; a limit of exactly 8 must match.
-  mimetype.detect_with_limit(
-    <<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>,
-    8,
-  )
-  |> should_be_mime("image/png")
-}
-
-pub fn detect_with_limit_tar_below_offset_test() {
-  // TAR `ustar` magic sits at offset 257; a limit of 256 must cut it off.
-  let bytes = <<0:size({ 257 * 8 }), 0x75, 0x73, 0x74, 0x61, 0x72, 0:size(64)>>
-  mimetype.detect_with_limit(bytes, 256)
-  |> should_be_mime("application/octet-stream")
-}
-
-pub fn detect_with_limit_tar_above_offset_test() {
-  let bytes = <<0:size({ 257 * 8 }), 0x75, 0x73, 0x74, 0x61, 0x72, 0:size(64)>>
-  mimetype.detect_with_limit(bytes, 512)
-  |> should_be_mime("application/x-tar")
-}
-
-pub fn detect_with_limit_zip_within_4_bytes_test() {
-  // ZIP local file header `50 4B 03 04` fits in 4 bytes.
-  mimetype.detect_with_limit(<<0x50, 0x4B, 0x03, 0x04, 20, 0, 0, 0>>, 4)
-  |> should_be_mime("application/zip")
-}
-
-pub fn detect_with_limit_empty_bytes_test() {
-  mimetype.detect_with_limit(<<>>, 1024)
-  |> should_be_mime("application/octet-stream")
-}
-
-pub fn detect_with_limit_zero_test() {
-  mimetype.detect_with_limit(
-    <<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>,
-    0,
-  )
-  |> should_be_mime("application/octet-stream")
-}
-
-pub fn detect_with_limit_negative_treated_as_zero_test() {
-  mimetype.detect_with_limit(
-    <<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>,
-    -1,
-  )
-  |> should_be_mime("application/octet-stream")
-}
-
-pub fn detect_with_limit_default_matches_detect_test() {
-  // detect/1 must agree with detect_with_limit using the default cap on
-  // every existing fixture.
-  let png = <<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>
-  let json = <<"{\"x\":1}":utf8>>
-  let text = <<"hello":utf8>>
-  mimetype.detect(png)
-  |> mimetype.to_string
-  |> should.equal(
-    mimetype.detect_with_limit(png, mimetype.default_detection_limit)
-    |> mimetype.to_string,
-  )
-  mimetype.detect(json)
-  |> mimetype.to_string
-  |> should.equal(
-    mimetype.detect_with_limit(json, mimetype.default_detection_limit)
-    |> mimetype.to_string,
-  )
-  mimetype.detect(text)
-  |> mimetype.to_string
-  |> should.equal(
-    mimetype.detect_with_limit(text, mimetype.default_detection_limit)
-    |> mimetype.to_string,
-  )
-}
-
-pub fn detect_with_limit_strict_returns_ok_test() {
-  mimetype.detect_with_limit_strict(
-    <<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>,
-    8,
-  )
-  |> should_be_ok_mime("image/png")
-}
-
-pub fn detect_with_limit_strict_returns_no_match_when_below_offset_test() {
-  let bytes = <<0:size({ 257 * 8 }), 0x75, 0x73, 0x74, 0x61, 0x72, 0:size(64)>>
-  mimetype.detect_with_limit_strict(bytes, 100)
-  |> should.equal(Error(mimetype.NoMatch))
-}
-
-pub fn detect_reader_returns_same_as_detect_test() {
-  let png = <<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>
-  let reader = fn(_limit) { Ok(png) }
-  mimetype.detect_reader(reader, 3072)
-  |> should_be_mime("image/png")
-}
-
-pub fn detect_reader_truncated_prefix_falls_back_test() {
-  // TAR signature at offset 257 — only 64 bytes provided
-  let short_bytes = <<0:size({ 64 * 8 })>>
-  let reader = fn(_limit) { Ok(short_bytes) }
-  mimetype.detect_reader(reader, 3072)
-  |> should_be_mime("application/octet-stream")
-}
-
-pub fn detect_reader_short_eof_still_detects_test() {
-  // Reader returns fewer bytes than limit but contains a valid PNG signature
-  let png = <<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>
-  let reader = fn(_limit) { Ok(png) }
-  mimetype.detect_reader(reader, 8192)
-  |> should_be_mime("image/png")
-}
-
-pub fn detect_reader_strict_error_preserves_reader_error_test() {
-  let reader = fn(_limit) { Error("disk read failure") }
-  mimetype.detect_reader_strict(reader, 3072)
-  |> should.equal(Error(mimetype.ReaderError("disk read failure")))
-}
-
-pub fn detect_reader_error_returns_default_test() {
-  let reader = fn(_limit) { Error("io error") }
-  mimetype.detect_reader(reader, 3072)
-  |> should_be_mime("application/octet-stream")
-}
-
-pub fn detect_reader_called_with_limit_test() {
-  // Verify reader receives the limit value
-  let reader = fn(requested) {
-    case requested {
-      100 -> Ok(<<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>)
-      _ -> Error("unexpected limit")
-    }
-  }
-  mimetype.detect_reader(reader, 100)
-  |> should_be_mime("image/png")
-}
-
-pub fn detect_reader_strict_ok_test() {
-  let png = <<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>
-  let reader = fn(_limit) { Ok(png) }
-  mimetype.detect_reader_strict(reader, 3072)
-  |> should_be_ok_mime("image/png")
-}
-
-pub fn detect_reader_strict_no_match_returns_no_match_test() {
-  let unknown = <<0x00, 0x01, 0x02, 0x03>>
-  let reader: fn(Int) -> Result(BitArray, String) = fn(_limit) { Ok(unknown) }
-  mimetype.detect_reader_strict(reader, 3072)
-  |> should.equal(Error(mimetype.NoMatch))
 }
 
 pub fn is_a_reflexive_test() {
@@ -2437,64 +2272,64 @@ pub fn ancestors_msword_inherits_from_ole_test() {
   |> should.equal(["application/x-ole-storage"])
 }
 
-pub fn charset_of_html_meta_charset_test() {
-  mimetype.charset_of(<<
+pub fn detect_charset_html_meta_charset_test() {
+  mimetype.detect_charset(<<
     "<html><head><meta charset=\"utf-8\"></head></html>":utf8,
   >>)
   |> should.equal(Ok("utf-8"))
 }
 
-pub fn charset_of_html_meta_charset_uppercase_test() {
-  mimetype.charset_of(<<
+pub fn detect_charset_html_meta_charset_uppercase_test() {
+  mimetype.detect_charset(<<
     "<html><head><meta charset=\"Shift_JIS\"></head></html>":utf8,
   >>)
   |> should.equal(Ok("shift_jis"))
 }
 
-pub fn charset_of_html_http_equiv_content_charset_test() {
-  mimetype.charset_of(<<
+pub fn detect_charset_html_http_equiv_content_charset_test() {
+  mimetype.detect_charset(<<
     "<html><head><meta http-equiv=\"Content-Type\" content=\"text/html; charset=Shift_JIS\"></head></html>":utf8,
   >>)
   |> should.equal(Ok("shift_jis"))
 }
 
-pub fn charset_of_xml_encoding_test() {
-  mimetype.charset_of(<<
+pub fn detect_charset_xml_encoding_test() {
+  mimetype.detect_charset(<<
     "<?xml version=\"1.0\" encoding=\"UTF-8\"?><root/>":utf8,
   >>)
   |> should.equal(Ok("utf-8"))
 }
 
-pub fn charset_of_utf8_bom_wins_over_meta_test() {
-  mimetype.charset_of(<<
+pub fn detect_charset_utf8_bom_wins_over_meta_test() {
+  mimetype.detect_charset(<<
     0xEF, 0xBB, 0xBF, "<html><meta charset=\"latin1\"></html>":utf8,
   >>)
   |> should.equal(Ok("utf-8"))
 }
 
-pub fn charset_of_pure_ascii_test() {
-  mimetype.charset_of(<<"Hello world\n":utf8>>)
+pub fn detect_charset_pure_ascii_test() {
+  mimetype.detect_charset(<<"Hello world\n":utf8>>)
   |> should.equal(Ok("us-ascii"))
 }
 
-pub fn charset_of_valid_utf8_multibyte_test() {
-  mimetype.charset_of(<<"こんにちは":utf8>>)
+pub fn detect_charset_valid_utf8_multibyte_test() {
+  mimetype.detect_charset(<<"こんにちは":utf8>>)
   |> should.equal(Ok("utf-8"))
 }
 
-pub fn charset_of_html_with_utf8_body_no_meta_test() {
-  mimetype.charset_of(<<"<html><body>こんにちは</body></html>":utf8>>)
+pub fn detect_charset_html_with_utf8_body_no_meta_test() {
+  mimetype.detect_charset(<<"<html><body>こんにちは</body></html>":utf8>>)
   |> should.equal(Ok("utf-8"))
 }
 
-pub fn charset_of_invalid_utf8_returns_no_match_test() {
+pub fn detect_charset_invalid_utf8_returns_no_match_test() {
   // 0xC0 0x20 — invalid UTF-8 (0xC0 is an over-long encoding lead byte that
   // cannot be followed by 0x20 in valid UTF-8).
-  mimetype.charset_of(<<0x48, 0x69, 0xC0, 0x20>>)
-  |> should.equal(Error(mimetype.NoMatch))
+  mimetype.detect_charset(<<0x48, 0x69, 0xC0, 0x20>>)
+  |> should.equal(Error(Nil))
 }
 
-pub fn charset_of_rejects_ill_formed_3_and_4_byte_sequences_test() {
+pub fn detect_charset_rejects_ill_formed_3_and_4_byte_sequences_test() {
   // Unicode Table 3-7: overlong forms, UTF-16 surrogates and code points
   // above U+10FFFF are not UTF-8 even though every byte is in the
   // lead / continuation range.
@@ -2509,8 +2344,8 @@ pub fn charset_of_rejects_ill_formed_3_and_4_byte_sequences_test() {
     <<0xF4, 0xBF, 0xBF, 0xBF>>,
   ]
   |> list.each(fn(sequence) {
-    mimetype.charset_of(<<"x":utf8, sequence:bits>>)
-    |> should.equal(Error(mimetype.NoMatch))
+    mimetype.detect_charset(<<"x":utf8, sequence:bits>>)
+    |> should.equal(Error(Nil))
   })
   // The first and last code points of each narrowed range stay valid.
   [
@@ -2521,41 +2356,41 @@ pub fn charset_of_rejects_ill_formed_3_and_4_byte_sequences_test() {
     <<0xF4, 0x8F, 0xBF, 0xBF>>,
   ]
   |> list.each(fn(sequence) {
-    mimetype.charset_of(<<"x":utf8, sequence:bits>>)
+    mimetype.detect_charset(<<"x":utf8, sequence:bits>>)
     |> should.equal(Ok("utf-8"))
   })
 }
 
-pub fn charset_of_empty_returns_empty_input_test() {
-  mimetype.charset_of(<<>>)
-  |> should.equal(Error(mimetype.EmptyInput))
+pub fn detect_charset_empty_returns_empty_input_test() {
+  mimetype.detect_charset(<<>>)
+  |> should.equal(Error(Nil))
 }
 
-pub fn charset_of_truncated_meta_does_not_false_positive_test() {
+pub fn detect_charset_truncated_meta_does_not_false_positive_test() {
   // <meta charset="u — incomplete attribute, no closing quote. The
   // quoted-value reader can't find the closing quote, but all-ASCII
   // input still falls through to us-ascii via the UTF-8 fallback.
-  mimetype.charset_of(<<"<meta charset=\"u":utf8>>)
+  mimetype.detect_charset(<<"<meta charset=\"u":utf8>>)
   |> should.equal(Ok("us-ascii"))
 }
 
-pub fn charset_of_utf16_le_bom_test() {
-  mimetype.charset_of(<<0xFF, 0xFE, 0x48, 0x00, 0x69, 0x00>>)
+pub fn detect_charset_utf16_le_bom_test() {
+  mimetype.detect_charset(<<0xFF, 0xFE, 0x48, 0x00, 0x69, 0x00>>)
   |> should.equal(Ok("utf-16le"))
 }
 
-pub fn charset_of_utf16_be_bom_test() {
-  mimetype.charset_of(<<0xFE, 0xFF, 0x00, 0x48, 0x00, 0x69>>)
+pub fn detect_charset_utf16_be_bom_test() {
+  mimetype.detect_charset(<<0xFE, 0xFF, 0x00, 0x48, 0x00, 0x69>>)
   |> should.equal(Ok("utf-16be"))
 }
 
-pub fn charset_of_utf32_le_bom_test() {
-  mimetype.charset_of(<<0xFF, 0xFE, 0x00, 0x00, 0x48, 0x00, 0x00, 0x00>>)
+pub fn detect_charset_utf32_le_bom_test() {
+  mimetype.detect_charset(<<0xFF, 0xFE, 0x00, 0x00, 0x48, 0x00, 0x00, 0x00>>)
   |> should.equal(Ok("utf-32le"))
 }
 
-pub fn charset_of_utf32_be_bom_test() {
-  mimetype.charset_of(<<0x00, 0x00, 0xFE, 0xFF, 0x00, 0x00, 0x00, 0x48>>)
+pub fn detect_charset_utf32_be_bom_test() {
+  mimetype.detect_charset(<<0x00, 0x00, 0xFE, 0xFF, 0x00, 0x00, 0x00, 0x48>>)
   |> should.equal(Ok("utf-32be"))
 }
 
@@ -2570,98 +2405,7 @@ pub fn charset_of_utf32_be_bom_test() {
 // as the BitArray-based path for diverse signature kinds (binary magic,
 // ZIP-container allowlist, structural sniffs).
 
-pub fn detect_reader_parity_jpeg_test() {
-  let jpeg = <<0xFF, 0xD8, 0xFF, 0xE0>>
-  let reader = fn(_limit) { Ok(jpeg) }
-  let from_reader = mimetype.detect_reader(reader, 3072)
-  let from_bytes = mimetype.detect(jpeg)
-  from_reader
-  |> mimetype.to_string
-  |> should.equal(mimetype.to_string(from_bytes))
-  from_reader
-  |> should_be_mime("image/jpeg")
-}
-
-pub fn detect_reader_parity_zip_container_docx_test() {
-  let docx =
-    bit_array.concat([
-      // Entry 1: [Content_Types].xml
-      <<0x50, 0x4B, 0x03, 0x04>>,
-      <<0x14, 0x00, 0x00, 0x00, 0x00, 0x00>>,
-      <<0x00, 0x00, 0x00, 0x00>>,
-      <<0x00, 0x00, 0x00, 0x00>>,
-      <<0x00, 0x00, 0x00, 0x00>>,
-      <<0x00, 0x00, 0x00, 0x00>>,
-      <<0x13, 0x00>>,
-      <<0x00, 0x00>>,
-      <<"[Content_Types].xml":utf8>>,
-      // Entry 2: word/document.xml
-      <<0x50, 0x4B, 0x03, 0x04>>,
-      <<0x14, 0x00, 0x00, 0x00, 0x00, 0x00>>,
-      <<0x00, 0x00, 0x00, 0x00>>,
-      <<0x00, 0x00, 0x00, 0x00>>,
-      <<0x00, 0x00, 0x00, 0x00>>,
-      <<0x00, 0x00, 0x00, 0x00>>,
-      <<0x11, 0x00>>,
-      <<0x00, 0x00>>,
-      <<"word/document.xml":utf8>>,
-    ])
-  let reader = fn(_limit) { Ok(docx) }
-  let from_reader = mimetype.detect_reader(reader, 3072)
-  let from_bytes = mimetype.detect(docx)
-  from_reader
-  |> mimetype.to_string
-  |> should.equal(mimetype.to_string(from_bytes))
-  from_reader
-  |> should_be_mime(
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  )
-}
-
-pub fn detect_reader_parity_json_structural_test() {
-  let json = <<"{\"x\":1}":utf8>>
-  let reader = fn(_limit) { Ok(json) }
-  let from_reader = mimetype.detect_reader(reader, 3072)
-  let from_bytes = mimetype.detect(json)
-  from_reader
-  |> mimetype.to_string
-  |> should.equal(mimetype.to_string(from_bytes))
-  from_reader
-  |> should_be_mime("application/json")
-}
-
-pub fn detect_reader_parity_html_structural_test() {
-  let html = <<"<html><body>hi</body></html>":utf8>>
-  let reader = fn(_limit) { Ok(html) }
-  let from_reader = mimetype.detect_reader(reader, 3072)
-  let from_bytes = mimetype.detect(html)
-  from_reader
-  |> mimetype.to_string
-  |> should.equal(mimetype.to_string(from_bytes))
-  from_reader
-  |> should_be_mime("text/html")
-}
-
 // detect_reader_strict: edge cases for empty / partial reader payloads.
-
-pub fn detect_reader_strict_empty_payload_returns_empty_input_test() {
-  let reader: fn(Int) -> Result(BitArray, String) = fn(_limit) { Ok(<<>>) }
-  mimetype.detect_reader_strict(reader, 3072)
-  |> should.equal(Error(mimetype.EmptyInput))
-}
-
-pub fn detect_reader_strict_partial_eof_returns_no_match_test() {
-  // Reader returns 64 zero bytes — TAR signature lives at offset 257, so
-  // no signature can match within the prefix and the all-zero payload
-  // also fails the printable-ASCII fallback. Strict variant must surface
-  // NoMatch (the lenient one is asserted separately above).
-  let short_bytes = <<0:size({ 64 * 8 })>>
-  let reader: fn(Int) -> Result(BitArray, String) = fn(_limit) {
-    Ok(short_bytes)
-  }
-  mimetype.detect_reader_strict(reader, 3072)
-  |> should.equal(Error(mimetype.NoMatch))
-}
 
 // ZIP-container allowlist negative cases: malformed allowlist hints must
 // fall back to application/zip rather than be coerced into a richer type.
@@ -2700,17 +2444,17 @@ pub fn detect_zip_with_only_content_types_xml_falls_back_to_zip_test() {
 
 pub fn detect_with_filename_uses_filename_for_empty_bytes_test() {
   mimetype.detect_with_filename(<<>>, "report.pdf")
-  |> should_be_mime("application/pdf")
+  |> should_be_ok_mime("application/pdf")
 }
 
 pub fn detect_with_filename_strict_returns_empty_input_for_empty_bytes_and_unknown_filename_test() {
-  mimetype.detect_with_filename_strict(<<>>, "README")
-  |> should.equal(Error(mimetype.EmptyInput))
+  mimetype.detect_with_filename(<<>>, "README")
+  |> should.equal(Error(Nil))
 }
 
 pub fn detect_with_extension_strict_returns_empty_input_for_empty_bytes_and_unknown_extension_test() {
-  mimetype.detect_with_extension_strict(<<>>, "totally-unknown-ext")
-  |> should.equal(Error(mimetype.EmptyInput))
+  mimetype.detect_with_extension(<<>>, "totally-unknown-ext")
+  |> should.equal(Error(Nil))
 }
 
 pub fn detect_with_filename_handles_path_components_test() {
@@ -2718,7 +2462,7 @@ pub fn detect_with_filename_handles_path_components_test() {
   // see only the trailing segment, so directory components don't poison
   // the extension lookup.
   mimetype.detect_with_filename(<<>>, "/tmp/files/note.pdf")
-  |> should_be_mime("application/pdf")
+  |> should_be_ok_mime("application/pdf")
 }
 
 // Issue #143: parse_strict rejects the RFC 7231 §3.1.1.1 parameter-list

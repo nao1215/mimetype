@@ -99,14 +99,14 @@ jobs:
       - name: Test
         run: just test-${{ matrix.target }}
 
-  readme-up-to-date:
-    name: README supported-format section matches signature table
+  supported-formats-up-to-date:
+    name: Supported-formats page matches signature table
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
-      - name: Verify README is in sync with magic.gleam
-        run: just readme-check
+      - name: Verify doc/supported-formats.md is in sync with magic.gleam
+        run: just formats-check
 
   mime-db-up-to-date:
     name: Generated MIME-DB matches script output

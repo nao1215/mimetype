@@ -3,13 +3,11 @@
 //// - `to_string` then `parse` gives back the same `MimeType` for any
 ////   header that parses, including quoted values with `"`, `\`, `;` and
 ////   spaces, and serialising twice is a no-op.
-//// - Detection with a byte limit only looks at that many bytes: cutting
-////   the input at the limit never changes the answer, and neither does
-////   anything appended after it.
+//// - Detection only looks at the first 3072 bytes: anything appended
+////   after them never changes the answer.
 
 import gleam/bit_array
 import gleam/list
-import gleam/option
 import gleam/result
 import gleam/string
 import metamon
@@ -94,59 +92,20 @@ fn signature_gen() -> Generator(BitArray) {
   ])
 }
 
-pub fn detect_with_limit_only_reads_the_first_limit_bytes_test() -> Nil {
+pub fn detect_only_reads_the_first_3072_bytes_test() -> Nil {
   metamon.forall(
     generator.tuple3(
       signature_gen(),
       generator.bit_array(range.constant(0, 40)),
-      generator.tuple2(
-        generator.int(range.constant(-2, 48)),
-        generator.bit_array(range.constant(0, 16)),
-      ),
+      generator.bit_array(range.constant(1, 16)),
     ),
     fn(input) {
-      let #(signature, tail, #(limit, junk)) = input
-      let bytes = bit_array.append(signature, tail)
-      let size = bit_array.byte_size(bytes)
-      let cut = case limit < 0, limit > size {
-        True, _ -> <<>>
-        _, True -> bytes
-        _, _ -> {
-          let assert Ok(head) = bit_array.slice(bytes, 0, limit)
-          head
-        }
-      }
-      // Only the detected type is compared: an empty input reports
-      // EmptyInput where a non-empty one cut to nothing reports NoMatch.
-      let detect = fn(b) {
-        option.from_result(mimetype.detect_with_limit_strict(b, limit))
-      }
-      let expected = detect(bytes)
-      // Bytes appended after the first `limit` are never read.
-      let appended = case limit <= size {
-        True -> detect(bit_array.append(cut, junk)) == expected
-        False -> True
-      }
-      detect(cut) == expected && appended
-    },
-  )
-}
-
-pub fn detect_reader_matches_detect_with_limit_test() -> Nil {
-  metamon.forall(
-    generator.tuple3(
-      signature_gen(),
-      generator.bit_array(range.constant(0, 40)),
-      generator.int(range.constant(0, 48)),
-    ),
-    fn(input) {
-      let #(signature, tail, limit) = input
-      let bytes = bit_array.append(signature, tail)
-      // A reader that ignores the requested count and hands back
-      // everything must not let detection look past `limit`.
-      let read_all = fn(_requested) { Ok(bytes) }
-      option.from_result(mimetype.detect_reader_strict(read_all, limit))
-      == option.from_result(mimetype.detect_with_limit_strict(bytes, limit))
+      let #(signature, tail, junk) = input
+      let head = bit_array.append(signature, tail)
+      let padding_size = 3072 - bit_array.byte_size(head)
+      let padded = bit_array.append(head, <<0:size({ padding_size * 8 })>>)
+      // Bytes appended after the first 3072 are never read.
+      mimetype.detect(bit_array.append(padded, junk)) == mimetype.detect(padded)
     },
   )
 }

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-11-23
+
 ### Changed
 
 The public API is smaller: every lookup and detection function now returns a `Result`, and the lenient copy of each function is gone. `mimetype` goes from 33 functions to 22 and `mimetype/accept` from 12 to 5.

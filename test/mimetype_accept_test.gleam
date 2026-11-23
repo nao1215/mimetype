@@ -1,6 +1,5 @@
 import gleam/list
 import gleeunit
-import gleeunit/should
 import mimetype
 import mimetype/accept
 
@@ -32,82 +31,67 @@ fn essences(items: List(accept.AcceptItem)) -> List(String) {
 // ---------------------------------------------------------------------------
 
 pub fn parse_empty_string_test() {
-  accept.parse("")
-  |> should.equal(Ok([]))
+  assert accept.parse("") == Ok([])
 }
 
 pub fn parse_whitespace_only_test() {
-  accept.parse("   ")
-  |> should.equal(Ok([]))
+  assert accept.parse("   ") == Ok([])
 }
 
 pub fn parse_single_concrete_test() {
   let assert Ok(items) = accept.parse("text/html")
-  items
-  |> ranges
-  |> should.equal([accept.Specific(mt("text/html"))])
+  assert items
+    |> ranges
+    == [accept.Specific(mt("text/html"))]
 }
 
 pub fn parse_default_q_is_1_test() {
   let assert Ok(items) = accept.parse("text/html")
-  case items {
-    [head] -> head.quality |> should.equal(1.0)
-    _ -> should.fail()
-  }
+  let assert [head] = items
+  assert head.quality == 1.0
 }
 
 pub fn parse_star_star_test() {
   let assert Ok(items) = accept.parse("*/*")
-  items
-  |> ranges
-  |> should.equal([accept.AnyType])
+  assert items
+    |> ranges
+    == [accept.AnyType]
 }
 
 pub fn parse_type_wildcard_test() {
   let assert Ok(items) = accept.parse("image/*")
-  items
-  |> ranges
-  |> should.equal([accept.TypeWildcard("image")])
+  assert items
+    |> ranges
+    == [accept.TypeWildcard("image")]
 }
 
 pub fn parse_multiple_entries_test() {
   let assert Ok(items) = accept.parse("text/html, application/json, image/*")
-  items
-  |> essences
-  |> should.equal(["text/html", "application/json", "image/*"])
+  assert items
+    |> essences
+    == ["text/html", "application/json", "image/*"]
 }
 
 pub fn parse_preserves_wire_order_test() {
   let assert Ok(items) = accept.parse("application/json, text/html")
-  items
-  |> essences
-  |> should.equal(["application/json", "text/html"])
+  assert items
+    |> essences
+    == ["application/json", "text/html"]
 }
 
 pub fn parse_q_value_extracted_test() {
   let assert Ok(items) = accept.parse("text/html;q=0.5")
-  case items {
-    [head] -> {
-      head.quality |> should.equal(0.5)
-      head.range |> should.equal(accept.Specific(mt("text/html")))
-    }
-    _ -> should.fail()
-  }
+  let assert [head] = items
+  assert head.quality == 0.5
+  assert head.range == accept.Specific(mt("text/html"))
 }
 
 pub fn parse_media_params_kept_test() {
   let assert Ok(items) = accept.parse("text/html;level=1;q=0.4")
-  case items {
-    [head] -> {
-      head.quality |> should.equal(0.4)
-      case head.range {
-        accept.Specific(m) ->
-          mimetype.parameter(m, "level") |> should.equal(Ok("1"))
-        _ -> should.fail()
-      }
-    }
-    _ -> should.fail()
-  }
+  let assert [accept.AcceptItem(range: accept.Specific(m), quality:, ..)] =
+    items
+  assert quality == 0.4
+  assert mimetype.parameter(m, "level") == Ok("1")
 }
 
 // ---------------------------------------------------------------------------
@@ -116,78 +100,54 @@ pub fn parse_media_params_kept_test() {
 
 pub fn q_value_short_zero_test() {
   let assert Ok(items) = accept.parse("text/html;q=0")
-  case items {
-    [head] -> head.quality |> should.equal(0.0)
-    _ -> should.fail()
-  }
+  let assert [head] = items
+  assert head.quality == 0.0
 }
 
 pub fn q_value_short_one_test() {
   let assert Ok(items) = accept.parse("text/html;q=1")
-  case items {
-    [head] -> head.quality |> should.equal(1.0)
-    _ -> should.fail()
-  }
+  let assert [head] = items
+  assert head.quality == 1.0
 }
 
 pub fn q_value_zero_dot_test() {
   let assert Ok(items) = accept.parse("text/html;q=0.")
-  case items {
-    [head] -> head.quality |> should.equal(0.0)
-    _ -> should.fail()
-  }
+  let assert [head] = items
+  assert head.quality == 0.0
 }
 
 pub fn q_value_one_point_zero_zero_zero_test() {
   let assert Ok(items) = accept.parse("text/html;q=1.000")
-  case items {
-    [head] -> head.quality |> should.equal(1.0)
-    _ -> should.fail()
-  }
+  let assert [head] = items
+  assert head.quality == 1.0
 }
 
 pub fn q_value_three_decimals_test() {
   let assert Ok(items) = accept.parse("text/html;q=0.125")
-  case items {
-    [head] -> head.quality |> should.equal(0.125)
-    _ -> should.fail()
-  }
+  let assert [head] = items
+  assert head.quality == 0.125
 }
 
 pub fn q_value_uppercase_name_test() {
   let assert Ok(items) = accept.parse("text/html;Q=0.5")
-  case items {
-    [head] -> head.quality |> should.equal(0.5)
-    _ -> should.fail()
-  }
+  let assert [head] = items
+  assert head.quality == 0.5
 }
 
 pub fn q_value_invalid_two_test() {
-  case accept.parse("text/html;q=2") {
-    Error(accept.InvalidQValue(_)) -> Nil
-    other -> should.fail() |> fn(_) { other |> should.equal(Ok([])) }
-  }
+  let assert Error(accept.InvalidQValue(_)) = accept.parse("text/html;q=2")
 }
 
 pub fn q_value_invalid_negative_test() {
-  case accept.parse("text/html;q=-0.5") {
-    Error(accept.InvalidQValue(_)) -> Nil
-    other -> should.fail() |> fn(_) { other |> should.equal(Ok([])) }
-  }
+  let assert Error(accept.InvalidQValue(_)) = accept.parse("text/html;q=-0.5")
 }
 
 pub fn q_value_invalid_four_decimals_test() {
-  case accept.parse("text/html;q=0.1234") {
-    Error(accept.InvalidQValue(_)) -> Nil
-    other -> should.fail() |> fn(_) { other |> should.equal(Ok([])) }
-  }
+  let assert Error(accept.InvalidQValue(_)) = accept.parse("text/html;q=0.1234")
 }
 
 pub fn q_value_invalid_one_with_nonzero_test() {
-  case accept.parse("text/html;q=1.5") {
-    Error(accept.InvalidQValue(_)) -> Nil
-    other -> should.fail() |> fn(_) { other |> should.equal(Ok([])) }
-  }
+  let assert Error(accept.InvalidQValue(_)) = accept.parse("text/html;q=1.5")
 }
 
 // ---------------------------------------------------------------------------
@@ -196,38 +156,23 @@ pub fn q_value_invalid_one_with_nonzero_test() {
 
 pub fn parse_quoted_value_with_comma_test() {
   let assert Ok(items) = accept.parse("text/plain;description=\"a, b\";q=0.5")
-  case items {
-    [head] -> {
-      head.quality |> should.equal(0.5)
-      case head.range {
-        accept.Specific(m) ->
-          mimetype.parameter(m, "description")
-          |> should.equal(Ok("a, b"))
-        _ -> should.fail()
-      }
-    }
-    _ -> should.fail()
-  }
+  let assert [accept.AcceptItem(range: accept.Specific(m), quality:, ..)] =
+    items
+  assert quality == 0.5
+  assert mimetype.parameter(m, "description") == Ok("a, b")
 }
 
 pub fn parse_quoted_value_with_semicolon_test() {
   let assert Ok(items) = accept.parse("text/plain;tag=\"x;y\"")
-  case items {
-    [head] ->
-      case head.range {
-        accept.Specific(m) ->
-          mimetype.parameter(m, "tag") |> should.equal(Ok("x;y"))
-        _ -> should.fail()
-      }
-    _ -> should.fail()
-  }
+  let assert [accept.AcceptItem(range: accept.Specific(m), ..)] = items
+  assert mimetype.parameter(m, "tag") == Ok("x;y")
 }
 
 pub fn parse_two_entries_quoted_value_test() {
   let assert Ok(items) = accept.parse("text/plain;t=\"a,b\", application/json")
-  items
-  |> essences
-  |> should.equal(["text/plain", "application/json"])
+  assert items
+    |> essences
+    == ["text/plain", "application/json"]
 }
 
 // ---------------------------------------------------------------------------
@@ -236,24 +181,22 @@ pub fn parse_two_entries_quoted_value_test() {
 
 pub fn whitespace_around_entries_test() {
   let assert Ok(items) = accept.parse("  text/html  ,  application/json  ")
-  items
-  |> essences
-  |> should.equal(["text/html", "application/json"])
+  assert items
+    |> essences
+    == ["text/html", "application/json"]
 }
 
 pub fn empty_entries_skipped_test() {
   let assert Ok(items) = accept.parse("text/html, , application/json")
-  items
-  |> essences
-  |> should.equal(["text/html", "application/json"])
+  assert items
+    |> essences
+    == ["text/html", "application/json"]
 }
 
 pub fn whitespace_around_q_test() {
   let assert Ok(items) = accept.parse("text/html ;  q  =  0.5")
-  case items {
-    [head] -> head.quality |> should.equal(0.5)
-    _ -> should.fail()
-  }
+  let assert [head] = items
+  assert head.quality == 0.5
 }
 
 // ---------------------------------------------------------------------------
@@ -261,29 +204,20 @@ pub fn whitespace_around_q_test() {
 // ---------------------------------------------------------------------------
 
 pub fn malformed_no_slash_test() {
-  case accept.parse("garbage") {
-    Error(accept.InvalidMediaRange(_)) -> Nil
-    other -> other |> should.equal(Ok([]))
-  }
+  let assert Error(accept.InvalidMediaRange(_)) = accept.parse("garbage")
 }
 
 pub fn malformed_subtype_wildcard_with_type_wildcard_test() {
-  case accept.parse("*/text") {
-    Error(accept.InvalidMediaRange(_)) -> Nil
-    other -> other |> should.equal(Ok([]))
-  }
+  let assert Error(accept.InvalidMediaRange(_)) = accept.parse("*/text")
 }
 
 pub fn malformed_empty_essence_test() {
-  case accept.parse("/") {
-    Error(accept.InvalidMediaRange(_)) -> Nil
-    other -> other |> should.equal(Ok([]))
-  }
+  let assert Error(accept.InvalidMediaRange(_)) = accept.parse("/")
 }
 
 pub fn malformed_only_comma_test() {
   let assert Ok(items) = accept.parse(",,,")
-  items |> should.equal([])
+  assert items == []
 }
 
 // ---------------------------------------------------------------------------
@@ -292,30 +226,30 @@ pub fn malformed_only_comma_test() {
 
 pub fn prefer_q_descending_test() {
   let assert Ok(items) = accept.parse("text/html;q=0.5, application/json;q=0.9")
-  accept.prefer(items)
-  |> essences
-  |> should.equal(["application/json", "text/html"])
+  assert accept.prefer(items)
+    |> essences
+    == ["application/json", "text/html"]
 }
 
 pub fn prefer_specificity_breaks_tie_test() {
   let assert Ok(items) = accept.parse("*/*, text/*, text/html")
-  accept.prefer(items)
-  |> essences
-  |> should.equal(["text/html", "text/*", "*/*"])
+  assert accept.prefer(items)
+    |> essences
+    == ["text/html", "text/*", "*/*"]
 }
 
 pub fn prefer_is_stable_test() {
   let assert Ok(items) = accept.parse("text/html, application/json")
-  accept.prefer(items)
-  |> essences
-  |> should.equal(["text/html", "application/json"])
+  assert accept.prefer(items)
+    |> essences
+    == ["text/html", "application/json"]
 }
 
 pub fn prefer_ext_count_breaks_tie_test() {
   let assert Ok(items) = accept.parse("text/html;q=0.5, text/plain;q=0.5;a=1")
-  accept.prefer(items)
-  |> essences
-  |> should.equal(["text/plain", "text/html"])
+  assert accept.prefer(items)
+    |> essences
+    == ["text/plain", "text/html"]
 }
 
 // ---------------------------------------------------------------------------
@@ -324,70 +258,69 @@ pub fn prefer_ext_count_breaks_tie_test() {
 
 pub fn negotiate_empty_offers_test() {
   let assert Ok(items) = accept.parse("text/html")
-  accept.negotiate(items, [])
-  |> should.equal(Error(Nil))
+  assert accept.negotiate(items, []) == Error(Nil)
 }
 
 pub fn negotiate_empty_client_returns_first_test() {
-  accept.negotiate([], [
-    mt("text/html"),
-    mt("application/json"),
-  ])
-  |> should.equal(Ok(mt("text/html")))
+  assert accept.negotiate([], [
+      mt("text/html"),
+      mt("application/json"),
+    ])
+    == Ok(mt("text/html"))
 }
 
 pub fn negotiate_star_star_returns_server_first_test() {
   let assert Ok(items) = accept.parse("*/*")
-  accept.negotiate(items, [
-    mt("application/json"),
-    mt("text/html"),
-  ])
-  |> should.equal(Ok(mt("application/json")))
+  assert accept.negotiate(items, [
+      mt("application/json"),
+      mt("text/html"),
+    ])
+    == Ok(mt("application/json"))
 }
 
 pub fn negotiate_exact_match_test() {
   let assert Ok(items) = accept.parse("text/html, application/json;q=0.5")
-  accept.negotiate(items, [
-    mt("application/json"),
-    mt("text/html"),
-  ])
-  |> should.equal(Ok(mt("text/html")))
+  assert accept.negotiate(items, [
+      mt("application/json"),
+      mt("text/html"),
+    ])
+    == Ok(mt("text/html"))
 }
 
 pub fn negotiate_type_wildcard_match_test() {
   let assert Ok(items) = accept.parse("image/*")
-  accept.negotiate(items, [
-    mt("application/json"),
-    mt("image/png"),
-  ])
-  |> should.equal(Ok(mt("image/png")))
+  assert accept.negotiate(items, [
+      mt("application/json"),
+      mt("image/png"),
+    ])
+    == Ok(mt("image/png"))
 }
 
 pub fn negotiate_q_zero_excludes_test() {
   let assert Ok(items) = accept.parse("text/html;q=0, application/json")
-  accept.negotiate(items, [
-    mt("text/html"),
-    mt("application/json"),
-  ])
-  |> should.equal(Ok(mt("application/json")))
+  assert accept.negotiate(items, [
+      mt("text/html"),
+      mt("application/json"),
+    ])
+    == Ok(mt("application/json"))
 }
 
 pub fn negotiate_no_match_test() {
   let assert Ok(items) = accept.parse("image/png")
-  accept.negotiate(items, [
-    mt("text/html"),
-    mt("application/json"),
-  ])
-  |> should.equal(Error(Nil))
+  assert accept.negotiate(items, [
+      mt("text/html"),
+      mt("application/json"),
+    ])
+    == Error(Nil)
 }
 
 pub fn negotiate_specificity_wins_test() {
   let assert Ok(items) = accept.parse("*/*;q=0.5, text/html;q=0.5")
-  accept.negotiate(items, [
-    mt("application/json"),
-    mt("text/html"),
-  ])
-  |> should.equal(Ok(mt("text/html")))
+  assert accept.negotiate(items, [
+      mt("application/json"),
+      mt("text/html"),
+    ])
+    == Ok(mt("text/html"))
 }
 
 // RFC 9110 §12.5.1: when several media ranges match an offer, the most
@@ -395,28 +328,27 @@ pub fn negotiate_specificity_wins_test() {
 // higher q does not override it.
 pub fn negotiate_explicit_q_zero_overrides_wildcards_test() {
   let assert Ok(items) = accept.parse("*/*, text/html;q=0")
-  accept.negotiate(items, [mt("text/html")])
-  |> should.equal(Error(Nil))
+  assert accept.negotiate(items, [mt("text/html")]) == Error(Nil)
 
   let assert Ok(items) =
     accept.parse("*/*;q=0.5, application/json;q=0, application/*")
-  accept.negotiate(items, [
-    mt("text/html"),
-    mt("application/json"),
-    mt("application/xml"),
-  ])
-  |> should.equal(Ok(mt("application/xml")))
+  assert accept.negotiate(items, [
+      mt("text/html"),
+      mt("application/json"),
+      mt("application/xml"),
+    ])
+    == Ok(mt("application/xml"))
 }
 
 pub fn negotiate_most_specific_range_sets_the_q_value_test() {
   // text/plain gets 0.3 from text/*, not 0.5 from */*, so json wins.
   let assert Ok(items) =
     accept.parse("text/*;q=0.3, */*;q=0.5, application/json;q=0.4")
-  accept.negotiate(items, [
-    mt("text/plain"),
-    mt("application/json"),
-  ])
-  |> should.equal(Ok(mt("application/json")))
+  assert accept.negotiate(items, [
+      mt("text/plain"),
+      mt("application/json"),
+    ])
+    == Ok(mt("application/json"))
 }
 
 // ---------------------------------------------------------------------------
@@ -425,42 +357,37 @@ pub fn negotiate_most_specific_range_sets_the_q_value_test() {
 
 pub fn parse_encoding_basic_test() {
   let assert Ok(items) = accept.parse_values("gzip, br;q=1.0, *;q=0.1")
-  list.length(items) |> should.equal(3)
+  assert list.length(items) == 3
 }
 
 pub fn parse_encoding_lowercases_test() {
   let assert Ok(items) = accept.parse_values("GZIP")
-  case items {
-    [head] -> head.value |> should.equal("gzip")
-    _ -> should.fail()
-  }
+  let assert [head] = items
+  assert head.value == "gzip"
 }
 
 pub fn negotiate_encoding_picks_highest_q_test() {
   let assert Ok(items) = accept.parse_values("gzip;q=0.5, br;q=1.0")
-  accept.negotiate_value(items, ["gzip", "br"])
-  |> should.equal(Ok("br"))
+  assert accept.negotiate_value(items, ["gzip", "br"]) == Ok("br")
 }
 
 pub fn negotiate_encoding_wildcard_test() {
   let assert Ok(items) = accept.parse_values("gzip, *;q=0.1")
-  accept.negotiate_value(items, ["br", "gzip"])
-  |> should.equal(Ok("gzip"))
+  assert accept.negotiate_value(items, ["br", "gzip"]) == Ok("gzip")
 }
 
 pub fn negotiate_charset_q_zero_excludes_test() {
   let assert Ok(items) = accept.parse_values("utf-8;q=0, iso-8859-1")
-  accept.negotiate_value(items, [
-    "utf-8",
-    "iso-8859-1",
-  ])
-  |> should.equal(Ok("iso-8859-1"))
+  assert accept.negotiate_value(items, [
+      "utf-8",
+      "iso-8859-1",
+    ])
+    == Ok("iso-8859-1")
 }
 
 pub fn negotiate_language_test() {
   let assert Ok(items) = accept.parse_values("en;q=0.9, ja")
-  accept.negotiate_value(items, ["en", "ja"])
-  |> should.equal(Ok("ja"))
+  assert accept.negotiate_value(items, ["en", "ja"]) == Ok("ja")
 }
 
 // ---------------------------------------------------------------------------
@@ -471,35 +398,35 @@ pub fn firefox_default_accept_test() {
   let header =
     "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
   let assert Ok(items) = accept.parse(header)
-  list.length(items) |> should.equal(6)
+  assert list.length(items) == 6
 }
 
 pub fn curl_default_accept_test() {
   let assert Ok(items) = accept.parse("*/*")
-  accept.negotiate(items, [
-    mt("application/json"),
-  ])
-  |> should.equal(Ok(mt("application/json")))
+  assert accept.negotiate(items, [
+      mt("application/json"),
+    ])
+    == Ok(mt("application/json"))
 }
 
 pub fn json_first_html_fallback_test() {
   let assert Ok(items) = accept.parse("application/json, text/html;q=0.5")
-  accept.negotiate(items, [
-    mt("text/html"),
-    mt("application/json"),
-  ])
-  |> should.equal(Ok(mt("application/json")))
+  assert accept.negotiate(items, [
+      mt("text/html"),
+      mt("application/json"),
+    ])
+    == Ok(mt("application/json"))
 }
 
 pub fn html_with_avif_and_webp_test() {
   let header =
     "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
   let assert Ok(items) = accept.parse(header)
-  accept.negotiate(items, [
-    mt("application/json"),
-    mt("text/html"),
-  ])
-  |> should.equal(Ok(mt("text/html")))
+  assert accept.negotiate(items, [
+      mt("application/json"),
+      mt("text/html"),
+    ])
+    == Ok(mt("text/html"))
 }
 
 // --- Accept-Encoding, Accept-Charset and Accept-Language -------------
@@ -513,21 +440,19 @@ fn negotiate_value(
 }
 
 pub fn negotiate_value_encoding_test() {
-  negotiate_value("gzip, br;q=0.9", ["br", "gzip", "identity"])
-  |> should.equal(Ok("gzip"))
+  assert negotiate_value("gzip, br;q=0.9", ["br", "gzip", "identity"])
+    == Ok("gzip")
 }
 
 pub fn negotiate_value_no_overlap_test() {
-  negotiate_value("br", ["gzip"])
-  |> should.equal(Error(Nil))
+  assert negotiate_value("br", ["gzip"]) == Error(Nil)
 }
 
 pub fn negotiate_value_returns_the_offer_as_given_test() {
-  negotiate_value("en-US, en;q=0.9, *;q=0.1", ["en-US", "de"])
-  |> should.equal(Ok("en-US"))
+  assert negotiate_value("en-US, en;q=0.9, *;q=0.1", ["en-US", "de"])
+    == Ok("en-US")
 }
 
 pub fn negotiate_value_empty_offers_test() {
-  negotiate_value("*", [])
-  |> should.equal(Error(Nil))
+  assert negotiate_value("*", []) == Error(Nil)
 }

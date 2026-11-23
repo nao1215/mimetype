@@ -60,6 +60,54 @@ jq -s '
   | $upstream + $overrides
 ' "$DB_JSON_UPSTREAM" "$OVERRIDES_JSON" > "$DB_JSON"
 
+# Pick one MIME type per extension, once, for both FFI tables. When
+# several types list the same extension, an entry in $preference wins,
+# then the source (iana, apache, nginx, then the rest), then the
+# alphabetically first type.
+#
+# - mp4: mime-db lists it under application/mp4 and video/mp4, both
+#   iana. A .mp4 file is nearly always video.
+# - wav: no WAV type is IANA-registered. Detection reports audio/wav,
+#   so the extension does too.
+# - deb: application/octet-stream also lists it, and also comes from
+#   iana. application/vnd.debian.binary-package is the registered type.
+EXT_TABLE="$tmp_dir/extensions.json"
+jq '
+  {
+    "mp4": "video/mp4",
+    "wav": "audio/wav",
+    "deb": "application/vnd.debian.binary-package"
+  } as $preference
+  | to_entries
+  | map(select(.value.extensions != null) | {
+      mime: .key,
+      source: (.value.source // "custom"),
+      extensions: .value.extensions
+    })
+  | map(.extensions[] as $ext | {ext: $ext, mime: .mime, source: .source})
+  | sort_by(.ext, .mime)
+  | group_by(.ext)
+  | map(
+      sort_by(
+        (if $preference[.ext] == .mime then 0 else 1 end),
+        (if .source == "iana" then 0
+         elif .source == "apache" then 1
+         elif .source == "nginx" then 2
+         else 3
+         end),
+        .mime
+      )[0]
+      | {ext, mime}
+    )
+' "$DB_JSON" > "$EXT_TABLE"
+
+MIME_TABLE="$tmp_dir/mime_types.json"
+jq '
+  to_entries
+  | map(select(.value.extensions != null) | {mime: .key, extensions: .value.extensions})
+  | sort_by(.mime)
+' "$DB_JSON" > "$MIME_TABLE"
+
 cat > "$tmp_gleam" <<EOF
 // This file contains data derived from jshttp/mime-db.
 // Upstream: https://github.com/jshttp/mime-db
@@ -156,49 +204,9 @@ extension_to_mime_table() ->
     #{
 EOF
   jq -r '
-    # Explicit per-extension preferences for cases where mime-db
-    # lists multiple iana-sourced types for the same extension and
-    # mime-types / Python mimetypes / browsers pick a specific one
-    # by convention. Without these, the alphabetical tiebreak picks
-    # the wrong primary type (e.g. application/mp4 over video/mp4
-    # for .mp4, video/matroska over video/x-matroska for .mkv).
-    # Mirrors the spirit of the jshttp/mime-types preference list.
-    {"mp4": "video/mp4", "mkv": "video/x-matroska"} as $preference
-    | to_entries
-    | map(select(.value.extensions != null) | {
-        mime: .key,
-        source: (.value.source // "custom"),
-        extensions: .value.extensions
-      })
-    | map(.extensions[] as $ext | {
-        ext: $ext,
-        mime: .mime,
-        source: .source
-      })
-    | sort_by(.ext, .mime)
-    | group_by(.ext)
-    | map(
-        sort_by(
-          # Explicit preference wins outright (0 before everything).
-          (if $preference[.ext] == .mime then 0 else 1 end),
-          (if .source == "iana" then 0
-           elif .source == "apache" then 1
-           elif .source == "nginx" then 2
-           else 3
-           end),
-          .mime
-        )[0]
-      )
-    | sort_by(.ext)
-    | map(
-        "        <<"
-        + (.ext | @json)
-        + "/utf8>> => <<"
-        + (.mime | @json)
-        + "/utf8>>"
-      )
+    map("        <<" + (.ext | @json) + "/utf8>> => <<" + (.mime | @json) + "/utf8>>")
     | join(",\n")
-  ' "$DB_JSON"
+  ' "$EXT_TABLE"
   cat <<EOF
     }.
 
@@ -206,20 +214,15 @@ mime_type_to_extensions_table() ->
     #{
 EOF
   jq -r '
-    to_entries
-    | map(select(.value.extensions != null))
-    | sort_by(.key)
-    | map(
-        "        <<"
-        + (.key | @json)
-        + "/utf8>> => ["
-        + (.value.extensions
-          | map("<<" + (. | @json) + "/utf8>>")
-          | join(", "))
-        + "]"
-      )
+    map(
+      "        <<"
+      + (.mime | @json)
+      + "/utf8>> => ["
+      + (.extensions | map("<<" + (. | @json) + "/utf8>>") | join(", "))
+      + "]"
+    )
     | join(",\n")
-  ' "$DB_JSON"
+  ' "$MIME_TABLE"
   cat <<EOF
     }.
 EOF
@@ -264,49 +267,16 @@ const missing = /* @__PURE__ */ Result\$Error(undefined);
 const extensionToMime = /* @__PURE__ */ new Map([
 EOF
   jq -r '
-    # Same preference map as the Erlang generator above. Keep the
-    # two in sync — they generate sibling FFI tables that callers
-    # expect to agree.
-    {"mp4": "video/mp4", "mkv": "video/x-matroska"} as $preference
-    | to_entries
-    | map(select(.value.extensions != null) | {
-        mime: .key,
-        source: (.value.source // "custom"),
-        extensions: .value.extensions
-      })
-    | map(.extensions[] as $ext | {
-        ext: $ext,
-        mime: .mime,
-        source: .source
-      })
-    | sort_by(.ext, .mime)
-    | group_by(.ext)
-    | map(
-        sort_by(
-          (if $preference[.ext] == .mime then 0 else 1 end),
-          (if .source == "iana" then 0
-           elif .source == "apache" then 1
-           elif .source == "nginx" then 2
-           else 3
-           end),
-          .mime
-        )[0]
-      )
-    | .[]
-    | "  [" + (.ext | @json) + ", " + (.mime | @json) + "],"
-  ' "$DB_JSON"
+    .[] | "  [" + (.ext | @json) + ", " + (.mime | @json) + "],"
+  ' "$EXT_TABLE"
   cat <<EOF
 ]);
 
 const mimeTypeToExtensionsMap = /* @__PURE__ */ new Map([
 EOF
   jq -r '
-    to_entries
-    | map(select(.value.extensions != null))
-    | sort_by(.key)
-    | .[]
-    | "  [" + (.key | @json) + ", toList(" + (.value.extensions | @json) + ")],"
-  ' "$DB_JSON"
+    .[] | "  [" + (.mime | @json) + ", toList(" + (.extensions | @json) + ")],"
+  ' "$MIME_TABLE"
   cat <<EOF
 ]);
 

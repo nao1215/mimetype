@@ -37,8 +37,9 @@ const parents: List(#(String, String)) = [
   #("application/msword", "application/x-ole-storage"),
   #("application/vnd.ms-excel", "application/x-ole-storage"),
   #("application/vnd.ms-powerpoint", "application/x-ole-storage"),
-  // SVG is XML.
-  #("image/svg+xml", "text/xml"),
+  // RFC 7303 defines text/xml as an alias of application/xml. The `+xml`
+  // types, SVG among them, reach application/xml through their suffix.
+  #("text/xml", "application/xml"),
 ]
 
 /// Look up the immediate parent of `mime`, or `Error(Nil)` if `mime` is a

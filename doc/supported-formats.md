@@ -14,6 +14,7 @@ run `just generate-formats` after adding or removing a signature.
 - `application/msword`
 - `application/ogg`
 - `application/pdf`
+- `application/postscript`
 - `application/rtf`
 - `application/vnd.android.package-archive`
 - `application/vnd.apache.parquet`
@@ -28,30 +29,30 @@ run `just generate-formats` after adding or removing a signature.
 - `application/vnd.openxmlformats-officedocument.presentationml.presentation`
 - `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
 - `application/vnd.openxmlformats-officedocument.wordprocessingml.document`
+- `application/vnd.rar`
 - `application/vnd.sqlite3`
 - `application/wasm`
 - `application/x-7z-compressed`
 - `application/x-archive`
 - `application/x-bzip2`
 - `application/x-compress`
-- `application/x-deflate`
 - `application/x-elf`
 - `application/x-lz4`
 - `application/x-lzh-compressed`
 - `application/x-lzip`
 - `application/x-ole-storage`
-- `application/x-rar-compressed`
 - `application/x-snappy-framed`
 - `application/x-tar`
 - `application/x-xz`
+- `application/xml`
 - `application/zip`
+- `application/zlib`
 - `application/zstd`
 
 ## Audio formats
 
 - `audio/aac`
 - `audio/ac3`
-- `audio/aiff`
 - `audio/amr`
 - `audio/amr-wb`
 - `audio/flac`
@@ -59,6 +60,7 @@ run `just generate-formats` after adding or removing a signature.
 - `audio/mp4`
 - `audio/mpeg`
 - `audio/wav`
+- `audio/x-aiff`
 
 ## Font formats
 
@@ -75,6 +77,9 @@ run `just generate-formats` after adding or removing a signature.
 - `image/fits`
 - `image/gif`
 - `image/heic`
+- `image/heic-sequence`
+- `image/heif`
+- `image/heif-sequence`
 - `image/jp2`
 - `image/jpeg`
 - `image/jxl`
@@ -82,6 +87,7 @@ run `just generate-formats` after adding or removing a signature.
 - `image/svg+xml`
 - `image/tiff`
 - `image/vnd.adobe.photoshop`
+- `image/vnd.microsoft.icon`
 - `image/vnd.ms-dds`
 - `image/vnd.radiance`
 - `image/webp`
@@ -98,14 +104,15 @@ run `just generate-formats` after adding or removing a signature.
 - `text/plain; charset=utf-32be`
 - `text/plain; charset=utf-32le`
 - `text/plain; charset=utf-8`
-- `text/xml`
 
 ## Video formats
 
+- `video/3gpp`
+- `video/3gpp2`
+- `video/matroska`
 - `video/mp4`
 - `video/quicktime`
 - `video/webm`
 - `video/x-flv`
-- `video/x-matroska`
 - `video/x-msvideo`
 <!-- END_SUPPORTED_FORMATS -->

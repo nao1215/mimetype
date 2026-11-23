@@ -1,152 +1,75 @@
-//// Internal parser primitives for RFC 9110 §12.5 `Accept`-family
-//// headers. Kept private (in `mimetype/internal/`) — the facade
-//// `mimetype/accept` re-exports the parts callers need.
-////
-//// Responsibilities:
-////   - q-value parsing per RFC 9110 §12.5.5
-////     (`qvalue = ( "0" [ "." 0*3DIGIT ] ) / ( "1" [ "." 0*3("0") ] )`).
-////   - Splitting a parameter list at the first `q=` parameter so the
-////     facade can separate media-range parameters from accept-ext.
-////   - Token-list parsing for `Accept-Encoding`, `Accept-Charset`, and
-////     `Accept-Language` (semicolon-separated `value[;q=...]`).
+//// Parsing helpers for the RFC 9110 §12.5 `Accept`-family headers.
 
 import gleam/bool
 import gleam/int
 import gleam/list
-import gleam/option.{type Option, None, Some}
+import gleam/result
 import gleam/string
-import mimetype/internal/parse
 
-/// Walk a parameter segment list (already split on `;`) and return
-/// `#(params_before_q, q_value, params_after_q)`. The `q` lookup is
-/// case-insensitive on the name. Returns `Error(Nil)` if a `q=`
-/// segment is present but the value is not a valid qvalue. Returns
-/// `Ok(#(all, 1.0, []))` if no `q=` parameter is present.
-pub fn split_at_q(
+/// Separates the weight from the `;`-separated segments that follow a
+/// media range or a value. Every parameter named `q` (in any case) is a
+/// weight, wherever it appears (RFC 9110 §12.5.1), and the first one
+/// decides. Returns the other segments and the weight, 1.0 when there
+/// is none, or `Error(Nil)` when the deciding value is not a qvalue.
+pub fn split_weight(
   segments: List(String),
-) -> Result(#(List(String), Float, List(String)), Nil) {
-  do_split_at_q(segments, [])
-}
-
-fn do_split_at_q(
-  remaining: List(String),
-  before: List(String),
-) -> Result(#(List(String), Float, List(String)), Nil) {
-  case remaining {
-    [] -> Ok(#(list.reverse(before), 1.0, []))
-    [seg, ..rest] ->
-      case extract_q(seg) {
-        Some(raw) ->
-          case parse_q_value(raw) {
-            Ok(q) -> Ok(#(list.reverse(before), q, rest))
-            Error(Nil) -> Error(Nil)
-          }
-        None -> do_split_at_q(rest, [seg, ..before])
-      }
+) -> Result(#(List(String), Float), Nil) {
+  let #(weights, parameters) = list.partition(segments, is_weight)
+  case weights {
+    [] -> Ok(#(parameters, 1.0))
+    [weight, ..] ->
+      weight
+      |> string.split_once("=")
+      |> result.try(fn(pair) { parse_qvalue(string.trim(pair.1)) })
+      |> result.map(fn(quality) { #(parameters, quality) })
   }
 }
 
-fn extract_q(segment: String) -> Option(String) {
-  case string.split_once(segment, on: "=") {
-    Error(Nil) -> None
-    Ok(#(name, value)) -> {
-      let normalized = name |> string.trim |> string.lowercase
-      case normalized == "q" {
-        True -> Some(string.trim(value))
-        False -> None
-      }
-    }
+fn is_weight(segment: String) -> Bool {
+  case string.split_once(segment, "=") {
+    Ok(#(name, _)) -> string.lowercase(string.trim(name)) == "q"
+    Error(Nil) -> False
   }
 }
 
-/// Parse an RFC 9110 §12.5.5 qvalue (`0`, `0.5`, `1`, `1.000` etc.).
-///
-/// Accepts the lenient short forms `0`, `0.`, `1`, `1.` and the
-/// unquoted form (RFC 9110 disallows surrounding double quotes for
-/// the `weight` rule). Returns `Error(Nil)` for empty input, values
-/// outside `[0.0, 1.0]`, more than three fractional digits, or any
-/// non-digit character.
-fn parse_q_value(raw: String) -> Result(Float, Nil) {
-  let trimmed = string.trim(raw)
-  use <- bool.guard(when: trimmed == "", return: Error(Nil))
-  case string.split_once(trimmed, on: ".") {
-    Error(Nil) ->
-      case trimmed {
-        "0" -> Ok(0.0)
-        "1" -> Ok(1.0)
-        _ -> Error(Nil)
-      }
-    Ok(#(int_part, frac_part)) ->
-      case int_part {
-        "0" -> parse_fraction_with_int(0, frac_part)
-        "1" -> parse_fraction_with_int(1, frac_part)
-        _ -> Error(Nil)
-      }
+/// RFC 9110 §12.4.2:
+/// `qvalue = ( "0" [ "." 0*3DIGIT ] ) / ( "1" [ "." 0*3("0") ] )`.
+fn parse_qvalue(raw: String) -> Result(Float, Nil) {
+  let #(whole, fraction) = case string.split_once(raw, ".") {
+    Ok(pair) -> pair
+    Error(Nil) -> #(raw, "")
+  }
+  let digits = string.to_graphemes(fraction)
+  use <- bool.guard(
+    when: list.length(digits) > 3 || !list.all(digits, is_digit),
+    return: Error(Nil),
+  )
+  let thousandths =
+    string.pad_end(fraction, 3, "0") |> int.parse |> result.unwrap(0)
+  case whole {
+    "0" -> Ok(int.to_float(thousandths) /. 1000.0)
+    "1" if thousandths == 0 -> Ok(1.0)
+    _ -> Error(Nil)
   }
 }
 
-fn parse_fraction_with_int(
-  int_part: Int,
-  frac_part: String,
-) -> Result(Float, Nil) {
-  // RFC 9110: up to 3 fractional digits.
-  use <- bool.guard(when: string.length(frac_part) > 3, return: Error(Nil))
-  case frac_part {
-    "" -> Ok(int.to_float(int_part))
-    _ ->
-      case int.parse(frac_part) {
-        Error(Nil) -> Error(Nil)
-        Ok(frac_int) -> {
-          // For "1", every fractional digit must be 0 to keep the
-          // total <= 1.0.
-          use <- bool.guard(
-            when: int_part == 1 && frac_int != 0,
-            return: Error(Nil),
-          )
-          let denom = case string.length(frac_part) {
-            1 -> 10.0
-            2 -> 100.0
-            3 -> 1000.0
-            // length 0 handled above
-            _ -> 1.0
-          }
-          Ok(int.to_float(int_part) +. int.to_float(frac_int) /. denom)
-        }
-      }
+fn is_digit(grapheme: String) -> Bool {
+  case grapheme {
+    "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" -> True
+    _ -> False
   }
 }
 
-/// Parse the simple comma-separated `value[;q=...]` form used by
-/// `Accept-Encoding`, `Accept-Charset`, and `Accept-Language`. Returns
-/// `Error(Nil)` if any entry has a syntactically invalid q-value or a
-/// missing value.
-pub fn parse_token_list(header: String) -> Result(List(#(String, Float)), Nil) {
-  let trimmed = string.trim(header)
-  use <- bool.guard(when: trimmed == "", return: Ok([]))
-  parse.split_unquoted(trimmed, on: ",")
-  |> list.filter_map(fn(entry) {
-    case string.trim(entry) {
-      "" -> Error(Nil)
-      non_empty -> Ok(non_empty)
-    }
-  })
-  |> list.try_map(parse_token_entry)
-}
-
-fn parse_token_entry(entry: String) -> Result(#(String, Float), Nil) {
-  let segments = case string.contains(entry, ";") {
-    True -> string.split(entry, on: ";")
-    False -> [entry]
+/// Parses one `value[;q=...]` entry of `Accept-Encoding`,
+/// `Accept-Charset` or `Accept-Language`, lowercasing the value. Returns
+/// `Error(Nil)` when the weight is not a qvalue or the value is empty.
+pub fn parse_value(entry: String) -> Result(#(String, Float), Nil) {
+  let #(value, parameters) = case string.split(entry, on: ";") {
+    [value, ..parameters] -> #(value, parameters)
+    [] -> #(entry, [])
   }
-  case segments {
-    [] -> Error(Nil)
-    [value_raw, ..params] -> {
-      let value = value_raw |> string.trim |> string.lowercase
-      use <- bool.guard(when: value == "", return: Error(Nil))
-      case split_at_q(params) {
-        Error(Nil) -> Error(Nil)
-        Ok(#(_before, q, _after)) -> Ok(#(value, q))
-      }
-    }
-  }
+  let value = value |> string.trim |> string.lowercase
+  use #(_, quality) <- result.try(split_weight(parameters))
+  use <- bool.guard(when: value == "", return: Error(Nil))
+  Ok(#(value, quality))
 }

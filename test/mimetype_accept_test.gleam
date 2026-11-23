@@ -1,6 +1,5 @@
 import gleam/list
 import gleeunit
-import gleeunit/should
 import mimetype
 import mimetype/accept
 
@@ -32,82 +31,66 @@ fn essences(items: List(accept.AcceptItem)) -> List(String) {
 // ---------------------------------------------------------------------------
 
 pub fn parse_empty_string_test() {
-  accept.parse("")
-  |> should.equal(Ok([]))
+  assert accept.parse("") == Ok([])
 }
 
 pub fn parse_whitespace_only_test() {
-  accept.parse("   ")
-  |> should.equal(Ok([]))
+  assert accept.parse("   ") == Ok([])
 }
 
 pub fn parse_single_concrete_test() {
   let assert Ok(items) = accept.parse("text/html")
-  items
-  |> ranges
-  |> should.equal([accept.Specific(mt("text/html"))])
+  assert items
+    |> ranges
+    == [accept.Specific(mt("text/html"))]
 }
 
 pub fn parse_default_q_is_1_test() {
   let assert Ok(items) = accept.parse("text/html")
-  case items {
-    [head] -> head.quality |> should.equal(1.0)
-    _ -> should.fail()
-  }
+  let assert [head] = items
+  assert head.quality == 1.0
 }
 
 pub fn parse_star_star_test() {
   let assert Ok(items) = accept.parse("*/*")
-  items
-  |> ranges
-  |> should.equal([accept.AnyType])
+  assert items
+    |> ranges
+    == [accept.AnyType]
 }
 
 pub fn parse_type_wildcard_test() {
   let assert Ok(items) = accept.parse("image/*")
-  items
-  |> ranges
-  |> should.equal([accept.TypeWildcard("image")])
+  assert items
+    |> ranges
+    == [accept.TypeWildcard("image")]
 }
 
 pub fn parse_multiple_entries_test() {
   let assert Ok(items) = accept.parse("text/html, application/json, image/*")
-  items
-  |> essences
-  |> should.equal(["text/html", "application/json", "image/*"])
+  assert items
+    |> essences
+    == ["text/html", "application/json", "image/*"]
 }
 
 pub fn parse_preserves_wire_order_test() {
   let assert Ok(items) = accept.parse("application/json, text/html")
-  items
-  |> essences
-  |> should.equal(["application/json", "text/html"])
+  assert items
+    |> essences
+    == ["application/json", "text/html"]
 }
 
 pub fn parse_q_value_extracted_test() {
   let assert Ok(items) = accept.parse("text/html;q=0.5")
-  case items {
-    [head] -> {
-      head.quality |> should.equal(0.5)
-      head.range |> should.equal(accept.Specific(mt("text/html")))
-    }
-    _ -> should.fail()
-  }
+  let assert [head] = items
+  assert head.quality == 0.5
+  assert head.range == accept.Specific(mt("text/html"))
 }
 
 pub fn parse_media_params_kept_test() {
   let assert Ok(items) = accept.parse("text/html;level=1;q=0.4")
-  case items {
-    [head] -> {
-      head.quality |> should.equal(0.4)
-      case head.range {
-        accept.Specific(m) ->
-          mimetype.parameter(m, "level") |> should.equal(Ok("1"))
-        _ -> should.fail()
-      }
-    }
-    _ -> should.fail()
-  }
+  let assert [accept.AcceptItem(range: accept.Specific(m), quality:)] = items
+  assert quality == 0.4
+  assert mimetype.parameter(m, "level") == Ok("1")
 }
 
 // ---------------------------------------------------------------------------
@@ -116,78 +99,54 @@ pub fn parse_media_params_kept_test() {
 
 pub fn q_value_short_zero_test() {
   let assert Ok(items) = accept.parse("text/html;q=0")
-  case items {
-    [head] -> head.quality |> should.equal(0.0)
-    _ -> should.fail()
-  }
+  let assert [head] = items
+  assert head.quality == 0.0
 }
 
 pub fn q_value_short_one_test() {
   let assert Ok(items) = accept.parse("text/html;q=1")
-  case items {
-    [head] -> head.quality |> should.equal(1.0)
-    _ -> should.fail()
-  }
+  let assert [head] = items
+  assert head.quality == 1.0
 }
 
 pub fn q_value_zero_dot_test() {
   let assert Ok(items) = accept.parse("text/html;q=0.")
-  case items {
-    [head] -> head.quality |> should.equal(0.0)
-    _ -> should.fail()
-  }
+  let assert [head] = items
+  assert head.quality == 0.0
 }
 
 pub fn q_value_one_point_zero_zero_zero_test() {
   let assert Ok(items) = accept.parse("text/html;q=1.000")
-  case items {
-    [head] -> head.quality |> should.equal(1.0)
-    _ -> should.fail()
-  }
+  let assert [head] = items
+  assert head.quality == 1.0
 }
 
 pub fn q_value_three_decimals_test() {
   let assert Ok(items) = accept.parse("text/html;q=0.125")
-  case items {
-    [head] -> head.quality |> should.equal(0.125)
-    _ -> should.fail()
-  }
+  let assert [head] = items
+  assert head.quality == 0.125
 }
 
 pub fn q_value_uppercase_name_test() {
   let assert Ok(items) = accept.parse("text/html;Q=0.5")
-  case items {
-    [head] -> head.quality |> should.equal(0.5)
-    _ -> should.fail()
-  }
+  let assert [head] = items
+  assert head.quality == 0.5
 }
 
 pub fn q_value_invalid_two_test() {
-  case accept.parse("text/html;q=2") {
-    Error(accept.InvalidQValue(_)) -> Nil
-    other -> should.fail() |> fn(_) { other |> should.equal(Ok([])) }
-  }
+  let assert Error(accept.InvalidQValue(_)) = accept.parse("text/html;q=2")
 }
 
 pub fn q_value_invalid_negative_test() {
-  case accept.parse("text/html;q=-0.5") {
-    Error(accept.InvalidQValue(_)) -> Nil
-    other -> should.fail() |> fn(_) { other |> should.equal(Ok([])) }
-  }
+  let assert Error(accept.InvalidQValue(_)) = accept.parse("text/html;q=-0.5")
 }
 
 pub fn q_value_invalid_four_decimals_test() {
-  case accept.parse("text/html;q=0.1234") {
-    Error(accept.InvalidQValue(_)) -> Nil
-    other -> should.fail() |> fn(_) { other |> should.equal(Ok([])) }
-  }
+  let assert Error(accept.InvalidQValue(_)) = accept.parse("text/html;q=0.1234")
 }
 
 pub fn q_value_invalid_one_with_nonzero_test() {
-  case accept.parse("text/html;q=1.5") {
-    Error(accept.InvalidQValue(_)) -> Nil
-    other -> should.fail() |> fn(_) { other |> should.equal(Ok([])) }
-  }
+  let assert Error(accept.InvalidQValue(_)) = accept.parse("text/html;q=1.5")
 }
 
 // ---------------------------------------------------------------------------
@@ -196,38 +155,22 @@ pub fn q_value_invalid_one_with_nonzero_test() {
 
 pub fn parse_quoted_value_with_comma_test() {
   let assert Ok(items) = accept.parse("text/plain;description=\"a, b\";q=0.5")
-  case items {
-    [head] -> {
-      head.quality |> should.equal(0.5)
-      case head.range {
-        accept.Specific(m) ->
-          mimetype.parameter(m, "description")
-          |> should.equal(Ok("a, b"))
-        _ -> should.fail()
-      }
-    }
-    _ -> should.fail()
-  }
+  let assert [accept.AcceptItem(range: accept.Specific(m), quality:)] = items
+  assert quality == 0.5
+  assert mimetype.parameter(m, "description") == Ok("a, b")
 }
 
 pub fn parse_quoted_value_with_semicolon_test() {
   let assert Ok(items) = accept.parse("text/plain;tag=\"x;y\"")
-  case items {
-    [head] ->
-      case head.range {
-        accept.Specific(m) ->
-          mimetype.parameter(m, "tag") |> should.equal(Ok("x;y"))
-        _ -> should.fail()
-      }
-    _ -> should.fail()
-  }
+  let assert [accept.AcceptItem(range: accept.Specific(m), ..)] = items
+  assert mimetype.parameter(m, "tag") == Ok("x;y")
 }
 
 pub fn parse_two_entries_quoted_value_test() {
   let assert Ok(items) = accept.parse("text/plain;t=\"a,b\", application/json")
-  items
-  |> essences
-  |> should.equal(["text/plain", "application/json"])
+  assert items
+    |> essences
+    == ["text/plain", "application/json"]
 }
 
 // ---------------------------------------------------------------------------
@@ -236,24 +179,22 @@ pub fn parse_two_entries_quoted_value_test() {
 
 pub fn whitespace_around_entries_test() {
   let assert Ok(items) = accept.parse("  text/html  ,  application/json  ")
-  items
-  |> essences
-  |> should.equal(["text/html", "application/json"])
+  assert items
+    |> essences
+    == ["text/html", "application/json"]
 }
 
 pub fn empty_entries_skipped_test() {
   let assert Ok(items) = accept.parse("text/html, , application/json")
-  items
-  |> essences
-  |> should.equal(["text/html", "application/json"])
+  assert items
+    |> essences
+    == ["text/html", "application/json"]
 }
 
 pub fn whitespace_around_q_test() {
   let assert Ok(items) = accept.parse("text/html ;  q  =  0.5")
-  case items {
-    [head] -> head.quality |> should.equal(0.5)
-    _ -> should.fail()
-  }
+  let assert [head] = items
+  assert head.quality == 0.5
 }
 
 // ---------------------------------------------------------------------------
@@ -261,29 +202,20 @@ pub fn whitespace_around_q_test() {
 // ---------------------------------------------------------------------------
 
 pub fn malformed_no_slash_test() {
-  case accept.parse("garbage") {
-    Error(accept.InvalidMediaRange(_)) -> Nil
-    other -> other |> should.equal(Ok([]))
-  }
+  let assert Error(accept.InvalidMediaRange(_)) = accept.parse("garbage")
 }
 
 pub fn malformed_subtype_wildcard_with_type_wildcard_test() {
-  case accept.parse("*/text") {
-    Error(accept.InvalidMediaRange(_)) -> Nil
-    other -> other |> should.equal(Ok([]))
-  }
+  let assert Error(accept.InvalidMediaRange(_)) = accept.parse("*/text")
 }
 
 pub fn malformed_empty_essence_test() {
-  case accept.parse("/") {
-    Error(accept.InvalidMediaRange(_)) -> Nil
-    other -> other |> should.equal(Ok([]))
-  }
+  let assert Error(accept.InvalidMediaRange(_)) = accept.parse("/")
 }
 
 pub fn malformed_only_comma_test() {
   let assert Ok(items) = accept.parse(",,,")
-  items |> should.equal([])
+  assert items == []
 }
 
 // ---------------------------------------------------------------------------
@@ -292,30 +224,30 @@ pub fn malformed_only_comma_test() {
 
 pub fn prefer_q_descending_test() {
   let assert Ok(items) = accept.parse("text/html;q=0.5, application/json;q=0.9")
-  accept.prefer(items)
-  |> essences
-  |> should.equal(["application/json", "text/html"])
+  assert accept.prefer(items)
+    |> essences
+    == ["application/json", "text/html"]
 }
 
 pub fn prefer_specificity_breaks_tie_test() {
   let assert Ok(items) = accept.parse("*/*, text/*, text/html")
-  accept.prefer(items)
-  |> essences
-  |> should.equal(["text/html", "text/*", "*/*"])
+  assert accept.prefer(items)
+    |> essences
+    == ["text/html", "text/*", "*/*"]
 }
 
 pub fn prefer_is_stable_test() {
   let assert Ok(items) = accept.parse("text/html, application/json")
-  accept.prefer(items)
-  |> essences
-  |> should.equal(["text/html", "application/json"])
+  assert accept.prefer(items)
+    |> essences
+    == ["text/html", "application/json"]
 }
 
 pub fn prefer_ext_count_breaks_tie_test() {
   let assert Ok(items) = accept.parse("text/html;q=0.5, text/plain;q=0.5;a=1")
-  accept.prefer(items)
-  |> essences
-  |> should.equal(["text/plain", "text/html"])
+  assert accept.prefer(items)
+    |> essences
+    == ["text/plain", "text/html"]
 }
 
 // ---------------------------------------------------------------------------
@@ -324,70 +256,69 @@ pub fn prefer_ext_count_breaks_tie_test() {
 
 pub fn negotiate_empty_offers_test() {
   let assert Ok(items) = accept.parse("text/html")
-  accept.negotiate(items, [])
-  |> should.equal(Error(Nil))
+  assert accept.negotiate(items, []) == Error(Nil)
 }
 
 pub fn negotiate_empty_client_returns_first_test() {
-  accept.negotiate([], [
-    mt("text/html"),
-    mt("application/json"),
-  ])
-  |> should.equal(Ok(mt("text/html")))
+  assert accept.negotiate([], [
+      mt("text/html"),
+      mt("application/json"),
+    ])
+    == Ok(mt("text/html"))
 }
 
 pub fn negotiate_star_star_returns_server_first_test() {
   let assert Ok(items) = accept.parse("*/*")
-  accept.negotiate(items, [
-    mt("application/json"),
-    mt("text/html"),
-  ])
-  |> should.equal(Ok(mt("application/json")))
+  assert accept.negotiate(items, [
+      mt("application/json"),
+      mt("text/html"),
+    ])
+    == Ok(mt("application/json"))
 }
 
 pub fn negotiate_exact_match_test() {
   let assert Ok(items) = accept.parse("text/html, application/json;q=0.5")
-  accept.negotiate(items, [
-    mt("application/json"),
-    mt("text/html"),
-  ])
-  |> should.equal(Ok(mt("text/html")))
+  assert accept.negotiate(items, [
+      mt("application/json"),
+      mt("text/html"),
+    ])
+    == Ok(mt("text/html"))
 }
 
 pub fn negotiate_type_wildcard_match_test() {
   let assert Ok(items) = accept.parse("image/*")
-  accept.negotiate(items, [
-    mt("application/json"),
-    mt("image/png"),
-  ])
-  |> should.equal(Ok(mt("image/png")))
+  assert accept.negotiate(items, [
+      mt("application/json"),
+      mt("image/png"),
+    ])
+    == Ok(mt("image/png"))
 }
 
 pub fn negotiate_q_zero_excludes_test() {
   let assert Ok(items) = accept.parse("text/html;q=0, application/json")
-  accept.negotiate(items, [
-    mt("text/html"),
-    mt("application/json"),
-  ])
-  |> should.equal(Ok(mt("application/json")))
+  assert accept.negotiate(items, [
+      mt("text/html"),
+      mt("application/json"),
+    ])
+    == Ok(mt("application/json"))
 }
 
 pub fn negotiate_no_match_test() {
   let assert Ok(items) = accept.parse("image/png")
-  accept.negotiate(items, [
-    mt("text/html"),
-    mt("application/json"),
-  ])
-  |> should.equal(Error(Nil))
+  assert accept.negotiate(items, [
+      mt("text/html"),
+      mt("application/json"),
+    ])
+    == Error(Nil)
 }
 
 pub fn negotiate_specificity_wins_test() {
   let assert Ok(items) = accept.parse("*/*;q=0.5, text/html;q=0.5")
-  accept.negotiate(items, [
-    mt("application/json"),
-    mt("text/html"),
-  ])
-  |> should.equal(Ok(mt("text/html")))
+  assert accept.negotiate(items, [
+      mt("application/json"),
+      mt("text/html"),
+    ])
+    == Ok(mt("text/html"))
 }
 
 // RFC 9110 §12.5.1: when several media ranges match an offer, the most
@@ -395,28 +326,27 @@ pub fn negotiate_specificity_wins_test() {
 // higher q does not override it.
 pub fn negotiate_explicit_q_zero_overrides_wildcards_test() {
   let assert Ok(items) = accept.parse("*/*, text/html;q=0")
-  accept.negotiate(items, [mt("text/html")])
-  |> should.equal(Error(Nil))
+  assert accept.negotiate(items, [mt("text/html")]) == Error(Nil)
 
   let assert Ok(items) =
     accept.parse("*/*;q=0.5, application/json;q=0, application/*")
-  accept.negotiate(items, [
-    mt("text/html"),
-    mt("application/json"),
-    mt("application/xml"),
-  ])
-  |> should.equal(Ok(mt("application/xml")))
+  assert accept.negotiate(items, [
+      mt("text/html"),
+      mt("application/json"),
+      mt("application/xml"),
+    ])
+    == Ok(mt("application/xml"))
 }
 
 pub fn negotiate_most_specific_range_sets_the_q_value_test() {
   // text/plain gets 0.3 from text/*, not 0.5 from */*, so json wins.
   let assert Ok(items) =
     accept.parse("text/*;q=0.3, */*;q=0.5, application/json;q=0.4")
-  accept.negotiate(items, [
-    mt("text/plain"),
-    mt("application/json"),
-  ])
-  |> should.equal(Ok(mt("application/json")))
+  assert accept.negotiate(items, [
+      mt("text/plain"),
+      mt("application/json"),
+    ])
+    == Ok(mt("application/json"))
 }
 
 // ---------------------------------------------------------------------------
@@ -425,42 +355,37 @@ pub fn negotiate_most_specific_range_sets_the_q_value_test() {
 
 pub fn parse_encoding_basic_test() {
   let assert Ok(items) = accept.parse_values("gzip, br;q=1.0, *;q=0.1")
-  list.length(items) |> should.equal(3)
+  assert list.length(items) == 3
 }
 
 pub fn parse_encoding_lowercases_test() {
   let assert Ok(items) = accept.parse_values("GZIP")
-  case items {
-    [head] -> head.value |> should.equal("gzip")
-    _ -> should.fail()
-  }
+  let assert [head] = items
+  assert head.value == "gzip"
 }
 
 pub fn negotiate_encoding_picks_highest_q_test() {
   let assert Ok(items) = accept.parse_values("gzip;q=0.5, br;q=1.0")
-  accept.negotiate_value(items, ["gzip", "br"])
-  |> should.equal(Ok("br"))
+  assert accept.negotiate_value(items, ["gzip", "br"]) == Ok("br")
 }
 
 pub fn negotiate_encoding_wildcard_test() {
   let assert Ok(items) = accept.parse_values("gzip, *;q=0.1")
-  accept.negotiate_value(items, ["br", "gzip"])
-  |> should.equal(Ok("gzip"))
+  assert accept.negotiate_value(items, ["br", "gzip"]) == Ok("gzip")
 }
 
 pub fn negotiate_charset_q_zero_excludes_test() {
   let assert Ok(items) = accept.parse_values("utf-8;q=0, iso-8859-1")
-  accept.negotiate_value(items, [
-    "utf-8",
-    "iso-8859-1",
-  ])
-  |> should.equal(Ok("iso-8859-1"))
+  assert accept.negotiate_value(items, [
+      "utf-8",
+      "iso-8859-1",
+    ])
+    == Ok("iso-8859-1")
 }
 
 pub fn negotiate_language_test() {
   let assert Ok(items) = accept.parse_values("en;q=0.9, ja")
-  accept.negotiate_value(items, ["en", "ja"])
-  |> should.equal(Ok("ja"))
+  assert accept.negotiate_value(items, ["en", "ja"]) == Ok("ja")
 }
 
 // ---------------------------------------------------------------------------
@@ -471,35 +396,35 @@ pub fn firefox_default_accept_test() {
   let header =
     "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
   let assert Ok(items) = accept.parse(header)
-  list.length(items) |> should.equal(6)
+  assert list.length(items) == 6
 }
 
 pub fn curl_default_accept_test() {
   let assert Ok(items) = accept.parse("*/*")
-  accept.negotiate(items, [
-    mt("application/json"),
-  ])
-  |> should.equal(Ok(mt("application/json")))
+  assert accept.negotiate(items, [
+      mt("application/json"),
+    ])
+    == Ok(mt("application/json"))
 }
 
 pub fn json_first_html_fallback_test() {
   let assert Ok(items) = accept.parse("application/json, text/html;q=0.5")
-  accept.negotiate(items, [
-    mt("text/html"),
-    mt("application/json"),
-  ])
-  |> should.equal(Ok(mt("application/json")))
+  assert accept.negotiate(items, [
+      mt("text/html"),
+      mt("application/json"),
+    ])
+    == Ok(mt("application/json"))
 }
 
 pub fn html_with_avif_and_webp_test() {
   let header =
     "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
   let assert Ok(items) = accept.parse(header)
-  accept.negotiate(items, [
-    mt("application/json"),
-    mt("text/html"),
-  ])
-  |> should.equal(Ok(mt("text/html")))
+  assert accept.negotiate(items, [
+      mt("application/json"),
+      mt("text/html"),
+    ])
+    == Ok(mt("text/html"))
 }
 
 // --- Accept-Encoding, Accept-Charset and Accept-Language -------------
@@ -513,21 +438,157 @@ fn negotiate_value(
 }
 
 pub fn negotiate_value_encoding_test() {
-  negotiate_value("gzip, br;q=0.9", ["br", "gzip", "identity"])
-  |> should.equal(Ok("gzip"))
+  assert negotiate_value("gzip, br;q=0.9", ["br", "gzip", "identity"])
+    == Ok("gzip")
 }
 
 pub fn negotiate_value_no_overlap_test() {
-  negotiate_value("br", ["gzip"])
-  |> should.equal(Error(Nil))
+  assert negotiate_value("br", ["gzip"]) == Error(Nil)
 }
 
 pub fn negotiate_value_returns_the_offer_as_given_test() {
-  negotiate_value("en-US, en;q=0.9, *;q=0.1", ["en-US", "de"])
-  |> should.equal(Ok("en-US"))
+  assert negotiate_value("en-US, en;q=0.9, *;q=0.1", ["en-US", "de"])
+    == Ok("en-US")
 }
 
 pub fn negotiate_value_empty_offers_test() {
-  negotiate_value("*", [])
-  |> should.equal(Error(Nil))
+  assert negotiate_value("*", []) == Error(Nil)
+}
+
+// ---------------------------------------------------------------------------
+// 10. RFC 9110 conformance
+// ---------------------------------------------------------------------------
+
+// §12.4.2: qvalue = ( "0" [ "." 0*3DIGIT ] ) / ( "1" [ "." 0*3("0") ] ).
+// Signs are not digits.
+pub fn q_value_fraction_must_be_digits_test() {
+  assert accept.parse("text/html;q=0.-1")
+    == Error(accept.InvalidQValue("text/html;q=0.-1"))
+  assert accept.parse("text/html;q=0.+5")
+    == Error(accept.InvalidQValue("text/html;q=0.+5"))
+  assert accept.parse("text/html;q=1.-0")
+    == Error(accept.InvalidQValue("text/html;q=1.-0"))
+  assert accept.parse_values("gzip;q=0.-1")
+    == Error(accept.InvalidQValue("gzip;q=0.-1"))
+}
+
+// §12.5.1: recipients SHOULD process any parameter named "q" as weight,
+// regardless of order, and the accept-ext grammar was removed, so
+// parameters after q still belong to the media range.
+pub fn parameters_after_q_belong_to_the_range_test() {
+  let assert Ok([accept.AcceptItem(range: accept.Specific(range), quality:)]) =
+    accept.parse("text/plain;q=0.5;format=flowed")
+  assert quality == 0.5
+  assert mimetype.parameter(range, "format") == Ok("flowed")
+}
+
+// §12.5.1: "text/plain;format=flowed" is more specific than "text/plain",
+// which is more specific than "text/*", then "*/*".
+pub fn prefer_orders_by_rfc_precedence_test() {
+  let assert Ok(items) =
+    accept.parse("*/*, text/*, text/plain, text/plain;format=flowed")
+  assert accept.prefer(items)
+    |> list.map(fn(item) {
+      case item.range {
+        accept.Specific(m) -> mimetype.to_string(m)
+        accept.TypeWildcard(t) -> t <> "/*"
+        accept.AnyType -> "*/*"
+      }
+    })
+    == ["text/plain; format=flowed", "text/plain", "text/*", "*/*"]
+}
+
+// §12.5.1 Table 5. The RFC lists 0.7 for text/html;level=3, which errata
+// report 7138 corrects to 0.3: no text/html range is in the header, so
+// text/* applies.
+pub fn rfc_9110_table_5_test() {
+  let assert Ok(items) =
+    accept.parse(
+      "text/*;q=0.3, text/plain;q=0.7, text/plain;format=flowed, text/plain;format=fixed;q=0.4, */*;q=0.5",
+    )
+  let pick = fn(a, b) { accept.negotiate(items, [mt(a), mt(b)]) }
+  // flowed 1 > plain 0.7 > image/jpeg 0.5 > fixed 0.4 > html 0.3
+  assert pick("text/plain;format=fixed", "text/plain;format=flowed")
+    == Ok(mt("text/plain;format=flowed"))
+  assert pick("text/plain;format=fixed", "text/plain") == Ok(mt("text/plain"))
+  assert pick("text/plain;format=fixed", "image/jpeg") == Ok(mt("image/jpeg"))
+  assert pick("text/html", "text/plain;format=fixed")
+    == Ok(mt("text/plain;format=fixed"))
+  assert pick("text/html;level=3", "text/plain;format=fixed")
+    == Ok(mt("text/plain;format=fixed"))
+  assert pick("text/html;level=3", "text/html") == Ok(mt("text/html;level=3"))
+}
+
+// A range with parameters applies only to offers that carry them.
+// Charset values compare without regard to case (RFC 9110 §8.3.2).
+pub fn range_parameters_must_match_the_offer_test() {
+  let assert Ok(items) = accept.parse("text/html;charset=utf-8")
+  assert accept.negotiate(items, [mt("text/html")]) == Error(Nil)
+  assert accept.negotiate(items, [mt("text/html;charset=UTF-8")])
+    == Ok(mt("text/html;charset=UTF-8"))
+  assert accept.negotiate(items, [mt("text/html;charset=utf-8;level=1")])
+    == Ok(mt("text/html;charset=utf-8;level=1"))
+  let assert Ok(items) = accept.parse("text/plain;format=flowed")
+  assert accept.negotiate(items, [mt("text/plain;format=Flowed")]) == Error(Nil)
+}
+
+// §12.5.1: the q value comes from the most specific matching range, so a
+// parameterised range overrides a bare one for the offers it matches.
+pub fn parameterised_range_overrides_the_bare_range_test() {
+  let assert Ok(items) = accept.parse("text/html, text/html;level=1;q=0")
+  assert accept.negotiate(items, [mt("text/html;level=1")]) == Error(Nil)
+  assert accept.negotiate(items, [mt("text/html;level=1"), mt("text/html")])
+    == Ok(mt("text/html"))
+}
+
+// §12.5.3 rule 2: a representation with no content coding is acceptable
+// unless "identity;q=0" or "*;q=0" excludes it. It is the least preferred
+// choice when the header does not name it.
+pub fn identity_is_acceptable_unless_excluded_test() {
+  assert negotiate_value("gzip", ["identity"]) == Ok("identity")
+  assert negotiate_value("gzip", ["identity", "gzip"]) == Ok("gzip")
+  assert negotiate_value("gzip;q=0.001", ["identity", "gzip"]) == Ok("identity")
+  assert negotiate_value("gzip, identity;q=0", ["identity"]) == Error(Nil)
+  assert negotiate_value("*;q=0", ["identity"]) == Error(Nil)
+  assert negotiate_value("*;q=0, identity", ["identity"]) == Ok("identity")
+  assert negotiate_value("br, *;q=0.5", ["identity", "br"]) == Ok("br")
+}
+
+// §12.5.3: an empty Accept-Encoding asks for no content coding.
+pub fn empty_header_prefers_identity_test() {
+  assert negotiate_value("", ["gzip", "identity"]) == Ok("identity")
+  assert negotiate_value("", ["gzip", "br"]) == Ok("gzip")
+}
+
+// §12.5.4 with RFC 4647 §3.3.1 basic filtering: a range matches a tag
+// that equals it or starts with it followed by "-". The longest
+// matching range sets the quality, as RFC 2616 §14.4 described.
+pub fn language_ranges_use_basic_filtering_test() {
+  assert negotiate_value("en", ["de", "en-US"]) == Ok("en-US")
+  assert negotiate_value("EN", ["en-us"]) == Ok("en-us")
+  assert negotiate_value("en;q=0.5, en-gb", ["en-US", "en-GB"]) == Ok("en-GB")
+  assert negotiate_value("en-gb", ["en"]) == Error(Nil)
+  assert negotiate_value("en", ["eng"]) == Error(Nil)
+  assert negotiate_value("en, en-us;q=0", ["en-US", "en"]) == Ok("en")
+  assert negotiate_value("da, en-gb;q=0.8, en;q=0.7", ["en-AU", "en-GB"])
+    == Ok("en-GB")
+}
+
+// `parse` and `parse_values` both report the entry that failed.
+pub fn parse_values_reports_the_failing_entry_test() {
+  assert accept.parse_values("gzip, br;q=x")
+    == Error(accept.InvalidQValue("br;q=x"))
+}
+
+// Prefix matching applies to primary language subtags only, so charset
+// and coding names that share a prefix stay apart.
+pub fn prefix_match_is_for_primary_language_subtags_test() {
+  assert negotiate_value("iso-2022-jp;q=0, *", ["iso-2022-jp-2"])
+    == Ok("iso-2022-jp-2")
+  assert negotiate_value("zh", ["zh-Hant-TW"]) == Ok("zh-Hant-TW")
+}
+
+pub fn invalid_range_parameter_reports_the_entry_test() {
+  assert accept.parse("text/html;q=0.5;a b=c, */*")
+    == Error(accept.InvalidMediaRange("text/html;q=0.5;a b=c"))
 }

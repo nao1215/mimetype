@@ -238,9 +238,10 @@ pub fn is_video(mime: MimeType) -> Bool {
 /// Returns `True` when `mime` is `parent` or a kind of `parent`.
 ///
 /// Parameters are ignored. The relation comes from a built-in table
-/// (`.docx` is a kind of `application/zip`, `image/svg+xml` of
-/// `text/xml`) and from the `+xml`, `+json`, `+zip` and `+cbor`
-/// suffixes.
+/// (`.docx` is a kind of `application/zip`, `text/xml` of
+/// `application/xml`) and from the `+xml`, `+json`, `+zip` and `+cbor`
+/// suffixes. Use `is_a` with `application/zip` to ask whether a file is a
+/// ZIP archive underneath, and with `application/xml` whether it is XML.
 ///
 /// ## Examples
 ///
@@ -253,21 +254,6 @@ pub fn is_video(mime: MimeType) -> Bool {
 ///
 pub fn is_a(mime: MimeType, parent: MimeType) -> Bool {
   predicates_internal.is_a(mime.essence, parent.essence)
-}
-
-/// Returns `True` for `application/zip` and the formats stored as ZIP
-/// archives, such as `.docx`, `.epub`, `.jar` and `.apk`.
-///
-pub fn is_zip_based(mime: MimeType) -> Bool {
-  predicates_internal.is_a(mime.essence, "application/zip")
-}
-
-/// Returns `True` for `text/xml`, `application/xml` and the types built
-/// on them, such as `image/svg+xml` and `application/atom+xml`.
-///
-pub fn is_xml_based(mime: MimeType) -> Bool {
-  predicates_internal.is_a(mime.essence, "text/xml")
-  || predicates_internal.is_a(mime.essence, "application/xml")
 }
 
 /// Returns the types `mime` is a kind of, nearest first. See `is_a`.
@@ -364,10 +350,12 @@ pub fn mime_type_to_extensions(mime: MimeType) -> List(String) {
 
 /// Detects the MIME type from the first bytes of a file.
 ///
-/// Only the first 3072 bytes are read. Input made only of printable
-/// ASCII is reported as `text/plain`. Returns `Error(Nil)` for empty
-/// input and for bytes that match no signature. The supported formats
-/// are listed on the "Supported formats" page.
+/// Only the first 3072 bytes are read. Bytes that match no signature
+/// and hold no binary data byte (0x00 to 0x08, 0x0B, 0x0E to 0x1A, 0x1C
+/// to 0x1F, as in WHATWG MIME Sniffing) are reported as `text/plain`, so
+/// UTF-8 and Latin-1 text are text too. Returns `Error(Nil)` for empty
+/// input and for other bytes that match no signature. The supported
+/// formats are listed on the "Supported formats" page.
 ///
 /// ## Examples
 ///
@@ -387,7 +375,7 @@ pub fn detect(bytes: BitArray) -> Result(MimeType, Nil) {
 }
 
 /// Detects the MIME type like `detect`, but returns `Error(Nil)` for
-/// plain ASCII text instead of `text/plain`.
+/// text without a signature instead of `text/plain`.
 ///
 /// Use it when another hint, such as a file name, should decide what
 /// a text file is.
@@ -405,14 +393,13 @@ pub fn detect_signature_only(bytes: BitArray) -> Result(MimeType, Nil) {
 
 fn detect_with(
   bytes: BitArray,
-  detector: fn(BitArray) -> option.Option(String),
+  detector: fn(BitArray) -> Result(String, Nil),
 ) -> Result(MimeType, Nil) {
   use <- bool.guard(when: bytes == <<>>, return: Error(Nil))
-  let head = case bit_array.byte_size(bytes) > detection_limit {
-    True -> bit_array.slice(bytes, 0, detection_limit) |> result.unwrap(bytes)
-    False -> bytes
-  }
-  head |> detector |> option.to_result(Nil) |> result.map(from_table)
+  bit_array.slice(bytes, 0, detection_limit)
+  |> result.unwrap(bytes)
+  |> detector
+  |> result.map(from_table)
 }
 
 /// Detects the MIME type from bytes and a file extension.
@@ -486,11 +473,13 @@ fn detect_with_hint(
 /// Detects the character encoding of text.
 ///
 /// The checks run in this order: a byte order mark (UTF-8, UTF-16 and
-/// UTF-32), the `encoding` of an XML declaration, an HTML
-/// `<meta charset>` in the first 1024 bytes, and last a scan that gives
-/// `us-ascii` for 7-bit input and `utf-8` for valid UTF-8. Names are
-/// lowercase. Returns `Error(Nil)` for empty input and for anything else,
-/// such as Latin-1 or Shift_JIS text without a declaration.
+/// UTF-32), the `encoding` of an XML declaration and a `<meta>` charset
+/// in the first 1024 bytes, and last a scan of the first 3072 bytes that
+/// gives `us-ascii` for 7-bit input and `utf-8` for valid UTF-8. The
+/// declarations are found in any ASCII-compatible encoding. Names are
+/// lowercase. Returns `Error(Nil)` for empty input, for input with a
+/// binary data byte (see `detect`), such as UTF-16 without a byte order
+/// mark, and for text in other encodings without a declaration.
 ///
 /// ## Examples
 ///

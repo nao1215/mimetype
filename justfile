@@ -51,10 +51,10 @@ docs:
 generate-db:
   bash scripts/generate_mime_db.sh
 
-generate-readme:
+generate-formats:
   sh scripts/generate_supported_formats.sh
 
-readme-check:
+formats-check:
   sh scripts/generate_supported_formats.sh --check
 
 bench-erlang:

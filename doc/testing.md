@@ -35,8 +35,15 @@ There is no mutation testing tool for Gleam, so `gleam_mutate.py` (from the muta
 |---|---|---:|---:|---:|
 | 2026-11-19 | every module under `src/`, with the metamorphic tests | 190 | 158 | 54.6% |
 | 2026-11-19 | the same, after the detection differential tests and the UTF-8 fix | 218 | 125 | 63.6% |
+| 2026-11-23 | every module under `src/` at v0.27.0 | 219 | 115 | 65.6% |
+| 2026-11-23 | after the table-driven signatures and the specification fixes | 174 | 58 | 75.0% |
+| 2026-11-23 | after `test/mimetype_boundary_test.gleam` | 244 | 1 | 99.6% |
 
-The UTF-8 scan in `internal/charset` was the largest group of survivors (49) before the differential test against the standard library; the test also found that the scan accepted overlong forms, surrogates and code points above U+10FFFF. The remaining survivors, grouped:
+The one survivor turns `byte <= 0x5A` into `byte < 0x5A` in the ASCII case folding of the HTML patterns. No pattern contains `z`, so the mutant is equivalent.
+
+The table-driven signatures removed most of the earlier survivors in `internal/magic`, since a row has no comparisons to mutate. The rest were real gaps, now covered: the EBML DocType search window, the zstd magic ranges, the ZIP walk over extra fields, data and its 20-entry budget, the JSON depth limit and number grammar, the tag-terminating bytes, the UTF-8 lead and continuation ranges, a sequence cut by the 3072-byte limit, the 1024-byte declaration window, and the length of a primary language subtag.
+
+Survivors of the 2026-11-19 runs, for reference:
 
 - `internal/magic` (91): the JSON sniffer (`json_validate_*`, `json_skip_*`), ZIP directory walking and container signatures, where a weakened check still lands on the same answer for every input in the suite. The differential test only feeds valid JSON, so mutants that accept more are not caught.
 - `internal/charset` (20): the scan's byte counters, which only matter for inputs longer than its 1024-byte budget, and the `<meta>` attribute terminators.

@@ -263,3 +263,28 @@ pub fn html_tag_terminators_and_case_test() {
   assert detected(<<"<HTML>":utf8>>) == Ok("text/html")
   assert detected(<<"<htmx>":utf8>>) == Ok("text/plain")
 }
+
+// Prefix matching needs 2 to 8 letters.
+pub fn primary_language_subtag_length_test() {
+  let value = fn(header, offers) {
+    let assert Ok(items) = accept.parse_values(header)
+    accept.negotiate_value(items, offers)
+  }
+  assert value("abcdefgh", ["abcdefgh-x"]) == Ok("abcdefgh-x")
+  assert value("abcdefghi", ["abcdefghi-x"]) == Error(Nil)
+  assert value("x;q=0, *", ["x-gzip"]) == Ok("x-gzip")
+}
+
+// Bytes above 0x7F count toward the 1024-byte declaration window.
+pub fn high_bytes_count_toward_the_declaration_window_test() {
+  let japanese = bit_array.from_string(string.repeat("あ", 342))
+  assert charset(<<japanese:bits, "<meta charset=\"koi8-r\">":utf8>>)
+    == Ok("utf-8")
+}
+
+pub fn zlib_flag_bytes_test() {
+  list.each([0x01, 0x5E, 0x9C, 0xDA], fn(flags) {
+    assert detected(<<0x78, flags, 0x00>>) == Ok("application/zlib")
+  })
+  assert detected(<<0x78, 0x02, 0x00>>) != Ok("application/zlib")
+}

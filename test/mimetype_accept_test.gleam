@@ -88,8 +88,7 @@ pub fn parse_q_value_extracted_test() {
 
 pub fn parse_media_params_kept_test() {
   let assert Ok(items) = accept.parse("text/html;level=1;q=0.4")
-  let assert [accept.AcceptItem(range: accept.Specific(m), quality:, ..)] =
-    items
+  let assert [accept.AcceptItem(range: accept.Specific(m), quality:)] = items
   assert quality == 0.4
   assert mimetype.parameter(m, "level") == Ok("1")
 }
@@ -156,8 +155,7 @@ pub fn q_value_invalid_one_with_nonzero_test() {
 
 pub fn parse_quoted_value_with_comma_test() {
   let assert Ok(items) = accept.parse("text/plain;description=\"a, b\";q=0.5")
-  let assert [accept.AcceptItem(range: accept.Specific(m), quality:, ..)] =
-    items
+  let assert [accept.AcceptItem(range: accept.Specific(m), quality:)] = items
   assert quality == 0.5
   assert mimetype.parameter(m, "description") == Ok("a, b")
 }
@@ -455,4 +453,129 @@ pub fn negotiate_value_returns_the_offer_as_given_test() {
 
 pub fn negotiate_value_empty_offers_test() {
   assert negotiate_value("*", []) == Error(Nil)
+}
+
+// ---------------------------------------------------------------------------
+// 10. RFC 9110 conformance
+// ---------------------------------------------------------------------------
+
+// §12.4.2: qvalue = ( "0" [ "." 0*3DIGIT ] ) / ( "1" [ "." 0*3("0") ] ).
+// Signs are not digits.
+pub fn q_value_fraction_must_be_digits_test() {
+  assert accept.parse("text/html;q=0.-1")
+    == Error(accept.InvalidQValue("text/html;q=0.-1"))
+  assert accept.parse("text/html;q=0.+5")
+    == Error(accept.InvalidQValue("text/html;q=0.+5"))
+  assert accept.parse("text/html;q=1.-0")
+    == Error(accept.InvalidQValue("text/html;q=1.-0"))
+  assert accept.parse_values("gzip;q=0.-1")
+    == Error(accept.InvalidQValue("gzip;q=0.-1"))
+}
+
+// §12.5.1: recipients SHOULD process any parameter named "q" as weight,
+// regardless of order, and the accept-ext grammar was removed, so
+// parameters after q still belong to the media range.
+pub fn parameters_after_q_belong_to_the_range_test() {
+  let assert Ok([accept.AcceptItem(range: accept.Specific(range), quality:)]) =
+    accept.parse("text/plain;q=0.5;format=flowed")
+  assert quality == 0.5
+  assert mimetype.parameter(range, "format") == Ok("flowed")
+}
+
+// §12.5.1: "text/plain;format=flowed" is more specific than "text/plain",
+// which is more specific than "text/*", then "*/*".
+pub fn prefer_orders_by_rfc_precedence_test() {
+  let assert Ok(items) =
+    accept.parse("*/*, text/*, text/plain, text/plain;format=flowed")
+  assert accept.prefer(items)
+    |> list.map(fn(item) {
+      case item.range {
+        accept.Specific(m) -> mimetype.to_string(m)
+        accept.TypeWildcard(t) -> t <> "/*"
+        accept.AnyType -> "*/*"
+      }
+    })
+    == ["text/plain; format=flowed", "text/plain", "text/*", "*/*"]
+}
+
+// §12.5.1 Table 5. The RFC lists 0.7 for text/html;level=3, which errata
+// report 7138 corrects to 0.3: no text/html range is in the header, so
+// text/* applies.
+pub fn rfc_9110_table_5_test() {
+  let assert Ok(items) =
+    accept.parse(
+      "text/*;q=0.3, text/plain;q=0.7, text/plain;format=flowed, text/plain;format=fixed;q=0.4, */*;q=0.5",
+    )
+  let pick = fn(a, b) { accept.negotiate(items, [mt(a), mt(b)]) }
+  // flowed 1 > plain 0.7 > image/jpeg 0.5 > fixed 0.4 > html 0.3
+  assert pick("text/plain;format=fixed", "text/plain;format=flowed")
+    == Ok(mt("text/plain;format=flowed"))
+  assert pick("text/plain;format=fixed", "text/plain") == Ok(mt("text/plain"))
+  assert pick("text/plain;format=fixed", "image/jpeg") == Ok(mt("image/jpeg"))
+  assert pick("text/html", "text/plain;format=fixed")
+    == Ok(mt("text/plain;format=fixed"))
+  assert pick("text/html;level=3", "text/plain;format=fixed")
+    == Ok(mt("text/plain;format=fixed"))
+  assert pick("text/html;level=3", "text/html") == Ok(mt("text/html;level=3"))
+}
+
+// A range with parameters applies only to offers that carry them.
+// Charset values compare without regard to case (RFC 9110 §8.3.2).
+pub fn range_parameters_must_match_the_offer_test() {
+  let assert Ok(items) = accept.parse("text/html;charset=utf-8")
+  assert accept.negotiate(items, [mt("text/html")]) == Error(Nil)
+  assert accept.negotiate(items, [mt("text/html;charset=UTF-8")])
+    == Ok(mt("text/html;charset=UTF-8"))
+  assert accept.negotiate(items, [mt("text/html;charset=utf-8;level=1")])
+    == Ok(mt("text/html;charset=utf-8;level=1"))
+  let assert Ok(items) = accept.parse("text/plain;format=flowed")
+  assert accept.negotiate(items, [mt("text/plain;format=Flowed")]) == Error(Nil)
+}
+
+// §12.5.1: the q value comes from the most specific matching range, so a
+// parameterised range overrides a bare one for the offers it matches.
+pub fn parameterised_range_overrides_the_bare_range_test() {
+  let assert Ok(items) = accept.parse("text/html, text/html;level=1;q=0")
+  assert accept.negotiate(items, [mt("text/html;level=1")]) == Error(Nil)
+  assert accept.negotiate(items, [mt("text/html;level=1"), mt("text/html")])
+    == Ok(mt("text/html"))
+}
+
+// §12.5.3 rule 2: a representation with no content coding is acceptable
+// unless "identity;q=0" or "*;q=0" excludes it. It is the least preferred
+// choice when the header does not name it.
+pub fn identity_is_acceptable_unless_excluded_test() {
+  assert negotiate_value("gzip", ["identity"]) == Ok("identity")
+  assert negotiate_value("gzip", ["identity", "gzip"]) == Ok("gzip")
+  assert negotiate_value("gzip;q=0.001", ["identity", "gzip"]) == Ok("identity")
+  assert negotiate_value("gzip, identity;q=0", ["identity"]) == Error(Nil)
+  assert negotiate_value("*;q=0", ["identity"]) == Error(Nil)
+  assert negotiate_value("*;q=0, identity", ["identity"]) == Ok("identity")
+  assert negotiate_value("br, *;q=0.5", ["identity", "br"]) == Ok("br")
+}
+
+// §12.5.3: an empty Accept-Encoding asks for no content coding.
+pub fn empty_header_prefers_identity_test() {
+  assert negotiate_value("", ["gzip", "identity"]) == Ok("identity")
+  assert negotiate_value("", ["gzip", "br"]) == Ok("gzip")
+}
+
+// §12.5.4 with RFC 4647 §3.3.1 basic filtering: a range matches a tag
+// that equals it or starts with it followed by "-". The longest
+// matching range sets the quality, as RFC 2616 §14.4 described.
+pub fn language_ranges_use_basic_filtering_test() {
+  assert negotiate_value("en", ["de", "en-US"]) == Ok("en-US")
+  assert negotiate_value("EN", ["en-us"]) == Ok("en-us")
+  assert negotiate_value("en;q=0.5, en-gb", ["en-US", "en-GB"]) == Ok("en-GB")
+  assert negotiate_value("en-gb", ["en"]) == Error(Nil)
+  assert negotiate_value("en", ["eng"]) == Error(Nil)
+  assert negotiate_value("en, en-us;q=0", ["en-US", "en"]) == Ok("en")
+  assert negotiate_value("da, en-gb;q=0.8, en;q=0.7", ["en-AU", "en-GB"])
+    == Ok("en-GB")
+}
+
+// `parse` and `parse_values` both report the entry that failed.
+pub fn parse_values_reports_the_failing_entry_test() {
+  assert accept.parse_values("gzip, br;q=x")
+    == Error(accept.InvalidQValue("br;q=x"))
 }

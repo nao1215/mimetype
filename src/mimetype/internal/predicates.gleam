@@ -54,10 +54,9 @@ pub fn is_video_essence(essence: String) -> Bool {
 ///
 /// Also recognises the RFC 6839 §3.1 structured-syntax suffix
 /// hierarchy: a `*+xml` type is treated as a child of
-/// `application/xml` (and `text/xml`), a `*+json` type as a child of
-/// `application/json`, and so on. The static-hierarchy table still
-/// wins when both apply, so `image/svg+xml` continues to inherit
-/// from `text/xml` via the explicit entry.
+/// `application/xml`, a `*+json` type as a child of
+/// `application/json`, and so on. The static-hierarchy table wins
+/// when both apply.
 pub fn is_a(mime: String, parent: String) -> Bool {
   use <- bool.guard(when: mime == "", return: False)
   use <- bool.guard(when: parent == "", return: False)

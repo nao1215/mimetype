@@ -238,9 +238,10 @@ pub fn is_video(mime: MimeType) -> Bool {
 /// Returns `True` when `mime` is `parent` or a kind of `parent`.
 ///
 /// Parameters are ignored. The relation comes from a built-in table
-/// (`.docx` is a kind of `application/zip`, `image/svg+xml` of
-/// `text/xml`) and from the `+xml`, `+json`, `+zip` and `+cbor`
-/// suffixes.
+/// (`.docx` is a kind of `application/zip`, `text/xml` of
+/// `application/xml`) and from the `+xml`, `+json`, `+zip` and `+cbor`
+/// suffixes. Use `is_a` with `application/zip` to ask whether a file is a
+/// ZIP archive underneath, and with `application/xml` whether it is XML.
 ///
 /// ## Examples
 ///
@@ -253,21 +254,6 @@ pub fn is_video(mime: MimeType) -> Bool {
 ///
 pub fn is_a(mime: MimeType, parent: MimeType) -> Bool {
   predicates_internal.is_a(mime.essence, parent.essence)
-}
-
-/// Returns `True` for `application/zip` and the formats stored as ZIP
-/// archives, such as `.docx`, `.epub`, `.jar` and `.apk`.
-///
-pub fn is_zip_based(mime: MimeType) -> Bool {
-  predicates_internal.is_a(mime.essence, "application/zip")
-}
-
-/// Returns `True` for `text/xml`, `application/xml` and the types built
-/// on them, such as `image/svg+xml` and `application/atom+xml`.
-///
-pub fn is_xml_based(mime: MimeType) -> Bool {
-  predicates_internal.is_a(mime.essence, "text/xml")
-  || predicates_internal.is_a(mime.essence, "application/xml")
 }
 
 /// Returns the types `mime` is a kind of, nearest first. See `is_a`.
@@ -405,14 +391,13 @@ pub fn detect_signature_only(bytes: BitArray) -> Result(MimeType, Nil) {
 
 fn detect_with(
   bytes: BitArray,
-  detector: fn(BitArray) -> option.Option(String),
+  detector: fn(BitArray) -> Result(String, Nil),
 ) -> Result(MimeType, Nil) {
   use <- bool.guard(when: bytes == <<>>, return: Error(Nil))
-  let head = case bit_array.byte_size(bytes) > detection_limit {
-    True -> bit_array.slice(bytes, 0, detection_limit) |> result.unwrap(bytes)
-    False -> bytes
-  }
-  head |> detector |> option.to_result(Nil) |> result.map(from_table)
+  bit_array.slice(bytes, 0, detection_limit)
+  |> result.unwrap(bytes)
+  |> detector
+  |> result.map(from_table)
 }
 
 /// Detects the MIME type from bytes and a file extension.

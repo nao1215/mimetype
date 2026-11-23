@@ -104,19 +104,15 @@ pub fn extension_to_mime_type_m4a_unchanged_test() {
   |> assert_mime("audio/mp4")
 }
 
-// Issue #140: `.mkv` used to resolve to video/matroska because of the
-// same alphabetical tiebreak. The canonical type per README, Python
-// mimetypes, Apache mime.types, and nginx is video/x-matroska, which
-// also carries the full extension list (mkv, mk3d, mks) in the
-// reverse table.
+// RFC 9559 registers video/matroska, and detection reports it too.
 pub fn extension_to_mime_type_mkv_test() {
   mimetype.extension_to_mime_type("mkv")
-  |> assert_mime("video/x-matroska")
+  |> assert_mime("video/matroska")
 }
 
 pub fn filename_to_mime_type_mkv_test() {
   mimetype.filename_to_mime_type("x.mkv")
-  |> assert_mime("video/x-matroska")
+  |> assert_mime("video/matroska")
 }
 
 pub fn extension_to_mime_type_empty_string_falls_back_to_default_test() {
@@ -632,16 +628,16 @@ pub fn parse_unquoted_value_split_unchanged_test() {
 }
 
 pub fn family_predicates_use_essence_test() {
-  assert mimetype.is_image(mt("IMAGE/PNG; version=1")) == True
+  assert mimetype.is_image(mt("IMAGE/PNG; version=1"))
 
-  assert mimetype.is_text(mt("text/html; charset=utf-8")) == True
+  assert mimetype.is_text(mt("text/html; charset=utf-8"))
 
-  assert mimetype.is_audio(mt("audio/mpeg")) == True
+  assert mimetype.is_audio(mt("audio/mpeg"))
 
-  assert mimetype.is_video(mt("video/mp4")) == True
+  assert mimetype.is_video(mt("video/mp4"))
 
   // application/json is text-treatable per RFC 8259 §8.1.
-  assert mimetype.is_image(mt("application/json")) == False
+  assert !mimetype.is_image(mt("application/json"))
 }
 
 // #129: `is_text` should recognise JSON-family and `+xml`-suffix types
@@ -650,43 +646,43 @@ pub fn family_predicates_use_essence_test() {
 // viewers, editors, and HTTP intermediaries all treat them that way.
 
 pub fn is_text_application_json_test() {
-  assert mimetype.is_text(mt("application/json")) == True
+  assert mimetype.is_text(mt("application/json"))
 }
 
 pub fn is_text_ld_plus_json_test() {
-  assert mimetype.is_text(mt("application/ld+json")) == True
+  assert mimetype.is_text(mt("application/ld+json"))
 }
 
 pub fn is_text_hal_plus_json_test() {
-  assert mimetype.is_text(mt("application/hal+json")) == True
+  assert mimetype.is_text(mt("application/hal+json"))
 }
 
 pub fn is_text_manifest_plus_json_test() {
-  assert mimetype.is_text(mt("application/manifest+json")) == True
+  assert mimetype.is_text(mt("application/manifest+json"))
 }
 
 pub fn is_text_xhtml_plus_xml_test() {
-  assert mimetype.is_text(mt("application/xhtml+xml")) == True
+  assert mimetype.is_text(mt("application/xhtml+xml"))
 }
 
 pub fn is_text_svg_plus_xml_test() {
-  assert mimetype.is_text(mt("image/svg+xml")) == True
+  assert mimetype.is_text(mt("image/svg+xml"))
 }
 
 pub fn is_text_application_xml_test() {
-  assert mimetype.is_text(mt("application/xml")) == True
+  assert mimetype.is_text(mt("application/xml"))
 }
 
 pub fn is_text_application_javascript_test() {
-  assert mimetype.is_text(mt("application/javascript")) == True
+  assert mimetype.is_text(mt("application/javascript"))
 }
 
 pub fn is_text_binary_image_returns_false_test() {
-  assert mimetype.is_text(mt("image/png")) == False
+  assert !mimetype.is_text(mt("image/png"))
 }
 
 pub fn is_text_application_octet_stream_returns_false_test() {
-  assert mimetype.is_text(mt("application/octet-stream")) == False
+  assert !mimetype.is_text(mt("application/octet-stream"))
 }
 
 pub fn extension_and_mime_mapping_roundtrip_test() {
@@ -759,7 +755,10 @@ pub fn filename_to_mime_type_ignores_hidden_file_without_extension_test() {
 }
 
 pub fn detect_png_test() {
-  assert_detects(<<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>, "image/png")
+  assert_detects(
+    <<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>,
+    "image/png",
+  )
 }
 
 pub fn detect_jpeg_test() {
@@ -834,11 +833,11 @@ pub fn detect_avi_test() {
 }
 
 pub fn detect_aiff_test() {
-  assert_detects(<<"FORM":utf8, 0, 0, 0, 0, "AIFF":utf8>>, "audio/aiff")
+  assert_detects(<<"FORM":utf8, 0, 0, 0, 0, "AIFF":utf8>>, "audio/x-aiff")
 }
 
 pub fn detect_bmp_test() {
-  assert_detects(<<"BM":utf8, 0, 0>>, "image/bmp")
+  assert_detects(<<"BM":utf8, 0, 0, 0, 0, 0, 0, 0, 0>>, "image/bmp")
 }
 
 pub fn detect_tiff_variants_test() {
@@ -847,7 +846,7 @@ pub fn detect_tiff_variants_test() {
 }
 
 pub fn detect_ico_test() {
-  assert_detects(<<0x00, 0x00, 0x01, 0x00>>, "image/x-icon")
+  assert_detects(<<0x00, 0x00, 0x01, 0x00>>, "image/vnd.microsoft.icon")
 }
 
 pub fn detect_sqlite_test() {
@@ -864,9 +863,8 @@ pub fn detect_strict_returns_empty_input_for_zero_bytes_test() {
 }
 
 pub fn detect_strict_returns_no_match_for_unknown_signature_test() {
-  // Single 0xFF byte — not empty, but no signature matches and the
-  // printable-ASCII fallback rejects it.
-  assert mimetype.detect(<<0xFF>>) == Error(Nil)
+  // No signature matches, and the NUL byte rules out text.
+  assert mimetype.detect(<<0xFF, 0x00>>) == Error(Nil)
 }
 
 pub fn detect_archive_and_compression_formats_test() {
@@ -881,13 +879,16 @@ pub fn detect_archive_and_compression_formats_test() {
   )
   assert_detects(
     <<0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00>>,
-    "application/x-rar-compressed",
+    "application/vnd.rar",
   )
   assert_detects(
     <<0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x00>>,
-    "application/x-rar-compressed",
+    "application/vnd.rar",
   )
-  assert_detects(<<"MSCF":utf8>>, "application/vnd.ms-cab-compressed")
+  assert_detects(
+    <<"MSCF":utf8, 0, 0, 0, 0>>,
+    "application/vnd.ms-cab-compressed",
+  )
   assert_detects(<<0x22, 0xB5, 0x2F, 0xFD>>, "application/zstd")
   assert_detects(<<0x50, 0x2A, 0x4D, 0x18>>, "application/zstd")
 }
@@ -1161,7 +1162,7 @@ pub fn detect_runtime_and_container_formats_test() {
 }
 
 pub fn detect_audio_formats_test() {
-  assert_detects(<<"ID3":utf8>>, "audio/mpeg")
+  assert_detects(<<"ID3":utf8, 0x03, 0x00>>, "audio/mpeg")
   assert_detects(<<0xFF, 0xFB, 0x90>>, "audio/mpeg")
   assert_detects(<<"fLaC":utf8, 0x00, 0x00, 0x00, 0x22>>, "audio/flac")
   assert_detects(<<"MThd":utf8>>, "audio/midi")
@@ -1171,8 +1172,10 @@ pub fn detect_empty_bytes_falls_back_to_default_test() {
   assert_no_match(<<>>)
 }
 
-pub fn detect_single_png_byte_falls_back_to_default_test() {
-  assert_no_match(<<0x89>>)
+pub fn detect_png_signature_prefix_is_not_png_test() {
+  // 0x89 is not a binary data byte, so a lone one is text.
+  assert_detects(<<0x89>>, "text/plain")
+  assert_no_match(<<0x89, "PNG":utf8, 0x0D, 0x0A, 0x1A>>)
 }
 
 pub fn detect_single_gif_byte_classified_as_text_test() {
@@ -1214,18 +1217,20 @@ pub fn detect_mp4_recognizes_extra_iso_bmff_brands_test() {
   assert_detects(<<0:size(32), "ftyp":utf8, "M4V ":utf8>>, "video/mp4")
   assert_detects(<<0:size(32), "ftyp":utf8, "f4v ":utf8>>, "video/mp4")
   assert_detects(<<0:size(32), "ftyp":utf8, "MSNV":utf8>>, "video/mp4")
-  assert_detects(<<0:size(32), "ftyp":utf8, "NDAS":utf8>>, "video/mp4")
   assert_detects(<<0:size(32), "ftyp":utf8, "dash":utf8>>, "video/mp4")
   assert_detects(<<0:size(32), "ftyp":utf8, "mp71":utf8>>, "video/mp4")
   assert_detects(<<0:size(32), "ftyp":utf8, "XYZQ":utf8>>, "video/mp4")
 }
 
 pub fn detect_mp4_specific_brands_take_precedence_over_catch_all_test() {
-  // The image/heic, audio/mp4 and video/quicktime brand mappings still win
+  // The image/heic, image/avif and audio/mp4 brand mappings still win
   // against the ftyp catch-all because the specific signatures are evaluated
   // first.
   assert_detects(<<0:size(32), "ftyp":utf8, "heix":utf8>>, "image/heic")
-  assert_detects(<<0:size(32), "ftyp":utf8, "hevc":utf8>>, "image/heic")
+  assert_detects(
+    <<0:size(32), "ftyp":utf8, "hevc":utf8>>,
+    "image/heic-sequence",
+  )
   assert_detects(<<0:size(32), "ftyp":utf8, "avis":utf8>>, "image/avif")
   assert_detects(<<0:size(32), "ftyp":utf8, "M4B ":utf8>>, "audio/mp4")
   assert_detects(<<0:size(32), "ftyp":utf8, "M4P ":utf8>>, "audio/mp4")
@@ -1373,7 +1378,7 @@ pub fn detect_with_extension_json_bytes_with_png_ext_returns_json_test() {
 pub fn detect_with_extension_xml_bytes_with_zip_ext_returns_xml_test() {
   let xml = <<"<?xml version=\"1.0\"?>":utf8>>
   mimetype.detect_with_extension(xml, "zip")
-  |> assert_mime("text/xml")
+  |> assert_mime("application/xml")
 }
 
 pub fn detect_with_extension_text_bytes_with_csv_ext_still_returns_csv_test() {
@@ -1598,8 +1603,9 @@ pub fn detect_html_short_tag_p_test() {
   assert_detects(<<"<p>hello":utf8>>, "text/html")
 }
 
-pub fn detect_html_truncated_tag_test() {
-  assert_detects(<<"<html":utf8>>, "text/html")
+pub fn detect_html_tag_needs_a_terminating_byte_test() {
+  assert_detects(<<"<html":utf8>>, "text/plain")
+  assert_detects(<<"<html ":utf8>>, "text/html")
 }
 
 pub fn detect_html_rejects_unknown_tag_test() {
@@ -1623,29 +1629,29 @@ pub fn detect_html_rejects_plain_text_test() {
 }
 
 pub fn detect_xml_declaration_test() {
-  assert_detects(<<"<?xml version=\"1.0\"?><root/>":utf8>>, "text/xml")
+  assert_detects(<<"<?xml version=\"1.0\"?><root/>":utf8>>, "application/xml")
 }
 
 pub fn detect_xml_with_encoding_test() {
   assert_detects(
     <<"<?xml version=\"1.0\" encoding=\"UTF-8\"?>":utf8>>,
-    "text/xml",
+    "application/xml",
   )
 }
 
 pub fn detect_xml_with_leading_whitespace_test() {
-  assert_detects(<<"  \n<?xml ?>":utf8>>, "text/xml")
+  assert_detects(<<"  \n<?xml ?>":utf8>>, "application/xml")
 }
 
 pub fn detect_xml_with_utf8_bom_test() {
   assert_detects(
     <<0xEF, 0xBB, 0xBF, "<?xml version=\"1.0\"?>":utf8>>,
-    "text/xml",
+    "application/xml",
   )
 }
 
 pub fn detect_xml_truncated_test() {
-  assert_detects(<<"<?xml ":utf8>>, "text/xml")
+  assert_detects(<<"<?xml ":utf8>>, "application/xml")
 }
 
 pub fn detect_xml_rejects_uppercase_declaration_test() {
@@ -1658,7 +1664,7 @@ pub fn detect_xml_rejects_processing_instruction_other_than_xml_test() {
 
 pub fn detect_xml_strict_returns_ok_test() {
   mimetype.detect(<<"<?xml version=\"1.0\"?>":utf8>>)
-  |> assert_mime("text/xml")
+  |> assert_mime("application/xml")
 }
 
 pub fn detect_html_strict_returns_ok_test() {
@@ -1707,8 +1713,9 @@ pub fn detect_svg_with_leading_whitespace_test() {
   assert_detects(<<"   \n  <svg></svg>":utf8>>, "image/svg+xml")
 }
 
-pub fn detect_svg_truncated_root_test() {
-  assert_detects(<<"<svg":utf8>>, "image/svg+xml")
+pub fn detect_svg_root_needs_a_terminating_byte_test() {
+  assert_detects(<<"<svg":utf8>>, "text/plain")
+  assert_detects(<<"<svg/":utf8>>, "image/svg+xml")
 }
 
 pub fn detect_svg_rejects_uppercase_root_test() {
@@ -1724,7 +1731,7 @@ pub fn detect_svg_rejects_extended_name_test() {
 }
 
 pub fn detect_svg_xml_prolog_without_svg_falls_back_to_xml_test() {
-  assert_detects(<<"<?xml ?><html>":utf8>>, "text/xml")
+  assert_detects(<<"<?xml ?><html>":utf8>>, "application/xml")
 }
 
 pub fn detect_svg_strict_returns_ok_test() {
@@ -1877,17 +1884,20 @@ pub fn detect_lzh_method_0_test() {
 
 pub fn detect_zlib_default_compression_test() {
   // 0x78 0x9C is the most common zlib stream prefix (default compression).
-  assert_detects(<<0x78, 0x9C, 0x00, 0x00>>, "application/x-deflate")
+  assert_detects(<<0x78, 0x9C, 0x00, 0x00>>, "application/zlib")
 }
 
 pub fn detect_zlib_best_compression_test() {
-  assert_detects(<<0x78, 0xDA, 0x00, 0x00>>, "application/x-deflate")
+  assert_detects(<<0x78, 0xDA, 0x00, 0x00>>, "application/zlib")
 }
 
 pub fn detect_zlib_does_not_steal_png_test() {
   // PNG bytes start with 0x89 PNG... — must NOT be detected as zlib even
   // though PNG contains zlib internally. Verifies signature ordering.
-  assert_detects(<<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>, "image/png")
+  assert_detects(
+    <<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>,
+    "image/png",
+  )
 }
 
 pub fn detect_compression_strict_returns_ok_for_lzip_test() {
@@ -1936,7 +1946,7 @@ pub fn detect_matroska_test() {
     0x1A, 0x45, 0xDF, 0xA3, 0x9F, 0x42, 0x86, 0x81, 0x01, 0x42, 0xF7, 0x81, 0x01,
     0x42, 0x82, 0x88, "matroska":utf8,
   >>
-  assert_detects(bytes, "video/x-matroska")
+  assert_detects(bytes, "video/matroska")
 }
 
 pub fn detect_webm_test() {
@@ -2009,10 +2019,9 @@ pub fn detect_text_plain_rejects_binary_with_nul_test() {
   assert_no_match(<<0x00, 0x01, 0x02, 0x03>>)
 }
 
-pub fn detect_text_plain_rejects_binary_with_high_byte_test() {
-  // High byte (0x80+) without BOM = binary, not text/plain. JSON/HTML/etc.
-  // would already not match, so this verifies the heuristic falls through.
-  assert_no_match(<<"hello":utf8, 0xC3>>)
+pub fn detect_text_plain_accepts_high_bytes_test() {
+  // WHATWG MIME Sniffing does not count bytes at or above 0x80 as binary.
+  assert_detects(<<"hello":utf8, 0xC3>>, "text/plain")
 }
 
 pub fn detect_text_plain_rejects_empty_test() {
@@ -2022,7 +2031,10 @@ pub fn detect_text_plain_rejects_empty_test() {
 
 pub fn detect_text_plain_does_not_steal_png_test() {
   // PNG bytes start with 0x89 (binary) so the text heuristic must not fire.
-  assert_detects(<<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>, "image/png")
+  assert_detects(
+    <<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>,
+    "image/png",
+  )
 }
 
 pub fn detect_text_plain_does_not_steal_json_test() {
@@ -2037,7 +2049,7 @@ pub fn detect_text_plain_strict_returns_ok_test() {
 }
 
 pub fn is_a_reflexive_test() {
-  assert mimetype.is_a(mt("application/zip"), mt("application/zip")) == True
+  assert mimetype.is_a(mt("application/zip"), mt("application/zip"))
 }
 
 pub fn is_a_docx_inherits_from_zip_test() {
@@ -2051,11 +2063,12 @@ pub fn is_a_docx_inherits_from_zip_test() {
 }
 
 pub fn is_a_svg_inherits_from_xml_test() {
-  assert mimetype.is_a(mt("image/svg+xml"), mt("text/xml")) == True
+  assert mimetype.is_a(mt("image/svg+xml"), mt("application/xml"))
+  assert !mimetype.is_a(mt("image/svg+xml"), mt("text/xml"))
 }
 
 pub fn is_a_unrelated_returns_false_test() {
-  assert mimetype.is_a(mt("image/png"), mt("application/zip")) == False
+  assert !mimetype.is_a(mt("image/png"), mt("application/zip"))
 }
 
 pub fn is_a_normalizes_essence_test() {
@@ -2068,65 +2081,64 @@ pub fn is_a_normalizes_essence_test() {
 }
 
 pub fn is_zip_based_apk_test() {
-  assert mimetype.is_zip_based(mt("application/vnd.android.package-archive"))
-    == True
+  assert is_zip(mt("application/vnd.android.package-archive")) == True
 }
 
 pub fn is_zip_based_jar_test() {
-  assert mimetype.is_zip_based(mt("application/java-archive")) == True
+  assert is_zip(mt("application/java-archive"))
 }
 
 pub fn is_zip_based_epub_test() {
-  assert mimetype.is_zip_based(mt("application/epub+zip")) == True
+  assert is_zip(mt("application/epub+zip"))
 }
 
 pub fn is_zip_based_zip_itself_test() {
-  assert mimetype.is_zip_based(mt("application/zip")) == True
+  assert is_zip(mt("application/zip"))
 }
 
 pub fn is_zip_based_png_test() {
-  assert mimetype.is_zip_based(mt("image/png")) == False
+  assert !is_zip(mt("image/png"))
 }
 
 pub fn is_xml_based_svg_test() {
-  assert mimetype.is_xml_based(mt("image/svg+xml")) == True
+  assert is_xml(mt("image/svg+xml"))
 }
 
 pub fn is_xml_based_text_xml_test() {
-  assert mimetype.is_xml_based(mt("text/xml")) == True
+  assert is_xml(mt("text/xml"))
 }
 
 pub fn is_xml_based_application_xml_test() {
-  assert mimetype.is_xml_based(mt("application/xml")) == True
+  assert is_xml(mt("application/xml"))
 }
 
 pub fn is_xml_based_html_test() {
   // HTML is sniffable but is not XML; it is not a child of text/xml.
-  assert mimetype.is_xml_based(mt("text/html")) == False
+  assert !is_xml(mt("text/html"))
 }
 
 // #128 / #130: every `*+xml` type is XML-based per RFC 6839 §3.1.
 
 pub fn is_xml_based_xhtml_plus_xml_test() {
-  assert mimetype.is_xml_based(mt("application/xhtml+xml")) == True
+  assert is_xml(mt("application/xhtml+xml"))
 }
 
 pub fn is_xml_based_atom_plus_xml_test() {
-  assert mimetype.is_xml_based(mt("application/atom+xml")) == True
+  assert is_xml(mt("application/atom+xml"))
 }
 
 pub fn is_xml_based_rss_plus_xml_test() {
-  assert mimetype.is_xml_based(mt("application/rss+xml")) == True
+  assert is_xml(mt("application/rss+xml"))
 }
 
 pub fn is_xml_based_soap_plus_xml_test() {
-  assert mimetype.is_xml_based(mt("application/soap+xml")) == True
+  assert is_xml(mt("application/soap+xml"))
 }
 
 pub fn is_xml_based_arbitrary_plus_xml_test() {
   // Any unknown `*+xml` registration is still XML-based per the
   // suffix grammar, not just the well-known ones.
-  assert mimetype.is_xml_based(mt("application/foo+xml")) == True
+  assert is_xml(mt("application/foo+xml"))
 }
 
 pub fn is_a_xhtml_is_application_xml_test() {
@@ -2462,4 +2474,12 @@ pub fn parse_lenient_drops_malformed_parameters_test() {
   assert mimetype.parse("text/plain;=value")
     |> result.map(mimetype.to_string)
     == Ok("text/plain")
+}
+
+fn is_zip(mime: mimetype.MimeType) -> Bool {
+  mimetype.is_a(mime, mt("application/zip"))
+}
+
+fn is_xml(mime: mimetype.MimeType) -> Bool {
+  mimetype.is_a(mime, mt("application/xml"))
 }

@@ -1,19 +1,34 @@
-//// Internal content-based MIME detection.
+//// Content-based MIME detection.
 ////
-//// The signatures below are intentionally limited to byte checks that
-//// can be evaluated portably on both the Erlang and JavaScript
-//// targets. Ordering is significant: the first matching signature wins.
+//// `signatures` is tried in order and the first match wins. Every
+//// check reads only the bytes it is given; the caller passes at most
+//// the first 3072 bytes of a file.
 
 import gleam/bit_array
 import gleam/bool
 import gleam/list
-import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import mimetype/internal/charset
 
 type Signature {
+  /// Every `#(offset, bytes)` pair is present.
   Bytes(String, List(#(Int, BitArray)))
+  /// A ZIP archive whose first entry is a stored file named `mimetype`
+  /// that holds the type itself, as EPUB and OpenDocument require.
+  StoredMimetype(String)
+  /// A ZIP archive with, for each prefix, an entry whose name starts
+  /// with it.
+  ZipEntries(String, List(String))
+  /// An OLE compound file with a stream named one of the names. With no
+  /// names, any OLE compound file.
+  OleStream(String, List(String))
+  /// An EBML header whose DocType is the given name (Matroska, WebM).
+  EbmlDocType(String, String)
+  /// An ISO base media file whose `ftyp` major brand starts with one of
+  /// the prefixes.
+  FtypBrand(String, List(String))
+  /// Any other test on the bytes.
   Check(String, fn(BitArray) -> Bool)
 }
 
@@ -21,166 +36,131 @@ const signatures = [
   Bytes("audio/wav", [#(0, <<"RIFF":utf8>>), #(8, <<"WAVE":utf8>>)]),
   Bytes("video/x-msvideo", [#(0, <<"RIFF":utf8>>), #(8, <<"AVI ":utf8>>)]),
   Bytes("image/webp", [#(0, <<"RIFF":utf8>>), #(8, <<"WEBP":utf8>>)]),
-  Bytes("audio/aiff", [#(0, <<"FORM":utf8>>), #(8, <<"AIFF":utf8>>)]),
-  Bytes("image/png", [#(0, <<0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A>>)]),
+  Bytes("audio/x-aiff", [#(0, <<"FORM":utf8>>), #(8, <<"AIFF":utf8>>)]),
+  Bytes("image/png", [#(0, <<0x89, "PNG":utf8, 0x0D, 0x0A, 0x1A, 0x0A>>)]),
   Bytes("image/jpeg", [#(0, <<0xFF, 0xD8, 0xFF>>)]),
   Bytes("image/gif", [#(0, <<"GIF87a":utf8>>)]),
   Bytes("image/gif", [#(0, <<"GIF89a":utf8>>)]),
-  Bytes("image/bmp", [#(0, <<"BM":utf8>>)]),
-  Bytes("image/tiff", [#(0, <<0x49, 0x49, 0x2A, 0x00>>)]),
-  Bytes("image/tiff", [#(0, <<0x4D, 0x4D, 0x00, 0x2A>>)]),
-  Bytes("image/x-icon", [#(0, <<0x00, 0x00, 0x01, 0x00>>)]),
+  // BITMAPFILEHEADER: the two reserved words after the file size are 0.
+  Bytes("image/bmp", [#(0, <<"BM":utf8>>), #(6, <<0, 0, 0, 0>>)]),
+  Bytes("image/tiff", [#(0, <<"II":utf8, 0x2A, 0x00>>)]),
+  Bytes("image/tiff", [#(0, <<"MM":utf8, 0x00, 0x2A>>)]),
+  Bytes("image/vnd.microsoft.icon", [#(0, <<0x00, 0x00, 0x01, 0x00>>)]),
   Bytes("image/x-icon", [#(0, <<0x00, 0x00, 0x02, 0x00>>)]),
-  Bytes("image/vnd.adobe.photoshop", [#(0, <<0x38, 0x42, 0x50, 0x53>>)]),
-  Bytes(
-    "image/jp2",
-    [
-      #(0, <<
-        0x00,
-        0x00,
-        0x00,
-        0x0C,
-        0x6A,
-        0x50,
-        0x20,
-        0x20,
-        0x0D,
-        0x0A,
-        0x87,
-        0x0A,
-      >>),
-    ],
-  ),
-  Bytes(
-    "image/jxl",
-    [
-      #(0, <<
-        0x00,
-        0x00,
-        0x00,
-        0x0C,
-        0x4A,
-        0x58,
-        0x4C,
-        0x20,
-        0x0D,
-        0x0A,
-        0x87,
-        0x0A,
-      >>),
-    ],
-  ),
+  Bytes("image/vnd.adobe.photoshop", [#(0, <<"8BPS":utf8>>)]),
+  // JPEG 2000 and the JPEG XL container start with a 12-byte signature box.
+  Bytes("image/jp2", [#(0, jpeg2000_box_size), #(4, <<"jP  ":utf8>>)]),
+  Bytes("image/jxl", [#(0, jpeg2000_box_size), #(4, <<"JXL ":utf8>>)]),
   Bytes("image/jxl", [#(0, <<0xFF, 0x0A>>)]),
   Bytes("image/vnd.ms-dds", [#(0, <<"DDS ":utf8>>)]),
   Bytes("image/vnd.radiance", [#(0, <<"#?RADIANCE":utf8, 0x0A>>)]),
   Bytes("image/x-exr", [#(0, <<0x76, 0x2F, 0x31, 0x01>>)]),
   Bytes("image/x-qoi", [#(0, <<"qoif":utf8>>)]),
   Bytes("image/fits", [#(0, <<"SIMPLE  =":utf8>>)]),
-  Bytes("application/pdf", [#(0, <<0x25, 0x50, 0x44, 0x46, 0x2D>>)]),
-  Bytes("application/pdf", [#(0, <<0x0A, 0x25, 0x50, 0x44, 0x46, 0x2D>>)]),
-  Bytes(
-    "application/pdf",
-    [#(0, <<0xEF, 0xBB, 0xBF, 0x25, 0x50, 0x44, 0x46, 0x2D>>)],
-  ),
-  Check("application/epub+zip", looks_like_epub),
-  Check("application/vnd.oasis.opendocument.text", looks_like_odt),
-  Check("application/vnd.oasis.opendocument.spreadsheet", looks_like_ods),
-  Check("application/vnd.oasis.opendocument.presentation", looks_like_odp),
-  Check(
+  Bytes("application/pdf", [#(0, <<"%PDF-":utf8>>)]),
+  Bytes("application/pdf", [#(0, <<0x0A, "%PDF-":utf8>>)]),
+  Bytes("application/pdf", [#(0, <<0xEF, 0xBB, 0xBF, "%PDF-":utf8>>)]),
+  Bytes("application/postscript", [#(0, <<"%!PS-Adobe-":utf8>>)]),
+  StoredMimetype("application/epub+zip"),
+  StoredMimetype("application/vnd.oasis.opendocument.text"),
+  StoredMimetype("application/vnd.oasis.opendocument.spreadsheet"),
+  StoredMimetype("application/vnd.oasis.opendocument.presentation"),
+  ZipEntries(
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    looks_like_docx,
+    ["[Content_Types].xml", "word/"],
   ),
-  Check(
+  ZipEntries(
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    looks_like_xlsx,
+    ["[Content_Types].xml", "xl/"],
   ),
-  Check(
+  ZipEntries(
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    looks_like_pptx,
+    ["[Content_Types].xml", "ppt/"],
   ),
-  Check("application/java-archive", looks_like_jar),
-  Check("application/vnd.android.package-archive", looks_like_apk),
-  Bytes("application/zip", [#(0, <<0x50, 0x4B, 0x03, 0x04>>)]),
-  Bytes("application/zip", [#(0, <<0x50, 0x4B, 0x05, 0x06>>)]),
-  Bytes("application/zip", [#(0, <<0x50, 0x4B, 0x07, 0x08>>)]),
+  ZipEntries("application/java-archive", ["META-INF/MANIFEST.MF"]),
+  ZipEntries("application/vnd.android.package-archive", ["AndroidManifest.xml"]),
+  Bytes("application/zip", [#(0, zip_local_header)]),
+  Bytes("application/zip", [#(0, <<"PK":utf8, 0x05, 0x06>>)]),
+  Bytes("application/zip", [#(0, <<"PK":utf8, 0x07, 0x08>>)]),
   Bytes("application/gzip", [#(0, <<0x1F, 0x8B>>)]),
-  Bytes("application/x-bzip2", [#(0, <<0x42, 0x5A, 0x68>>)]),
-  Bytes("application/x-xz", [#(0, <<0xFD, 0x37, 0x7A, 0x58, 0x5A, 0x00>>)]),
+  Bytes("application/x-bzip2", [#(0, <<"BZh":utf8>>)]),
+  Bytes("application/x-xz", [#(0, <<0xFD, "7zXZ":utf8, 0x00>>)]),
   Bytes("application/x-lz4", [#(0, <<0x04, 0x22, 0x4D, 0x18>>)]),
   Bytes("application/x-lz4", [#(0, <<0x02, 0x21, 0x4C, 0x18>>)]),
   Bytes("application/x-lzip", [#(0, <<"LZIP":utf8>>)]),
   Bytes(
     "application/x-snappy-framed",
-    [#(0, <<0xFF, 0x06, 0x00, 0x00, 0x73, 0x4E, 0x61, 0x50, 0x70, 0x59>>)],
+    [
+      #(0, <<0xFF, 0x06, 0x00, 0x00, "sNaPpY":utf8>>),
+    ],
   ),
   Bytes("application/x-compress", [#(0, <<0x1F, 0x9D>>)]),
   Bytes("application/x-archive", [#(0, <<"!<arch>":utf8, 0x0A>>)]),
-  Check("application/x-lzh-compressed", has_lzh_magic),
+  // LZH: `??-lh?-`, where `?` is any byte.
   Bytes(
-    "application/x-7z-compressed",
-    [#(0, <<0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C>>)],
-  ),
-  Bytes(
-    "application/x-rar-compressed",
-    [#(0, <<0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x00>>)],
-  ),
-  Bytes(
-    "application/x-rar-compressed",
-    [#(0, <<0x52, 0x61, 0x72, 0x21, 0x1A, 0x07, 0x01, 0x00>>)],
-  ),
-  Bytes("application/vnd.ms-cab-compressed", [#(0, <<0x4D, 0x53, 0x43, 0x46>>)]),
-  Check("application/msword", looks_like_ole_word),
-  Check("application/vnd.ms-excel", looks_like_ole_excel),
-  Check("application/vnd.ms-powerpoint", looks_like_ole_powerpoint),
-  Check("application/x-ole-storage", looks_like_ole_cfb),
-  Bytes("application/wasm", [#(0, <<0x00, 0x61, 0x73, 0x6D>>)]),
-  Bytes("application/x-elf", [#(0, <<0x7F, 0x45, 0x4C, 0x46>>)]),
-  Bytes(
-    "application/vnd.sqlite3",
+    "application/x-lzh-compressed",
     [
-      #(0, <<
-        0x53,
-        0x51,
-        0x4C,
-        0x69,
-        0x74,
-        0x65,
-        0x20,
-        0x66,
-        0x6F,
-        0x72,
-        0x6D,
-        0x61,
-        0x74,
-        0x20,
-        0x33,
-        0x00,
-      >>),
+      #(2, <<"-lh":utf8>>),
+      #(6, <<"-":utf8>>),
     ],
   ),
-  Bytes("application/vnd.apache.parquet", [#(0, <<0x50, 0x41, 0x52, 0x31>>)]),
+  Bytes(
+    "application/x-7z-compressed",
+    [
+      #(0, <<"7z":utf8, 0xBC, 0xAF, 0x27, 0x1C>>),
+    ],
+  ),
+  Bytes("application/vnd.rar", [#(0, <<"Rar!":utf8, 0x1A, 0x07, 0x00>>)]),
+  Bytes("application/vnd.rar", [#(0, <<"Rar!":utf8, 0x1A, 0x07, 0x01, 0x00>>)]),
+  // MS-CAB CFHEADER: the reserved field after the signature is 0.
+  Bytes(
+    "application/vnd.ms-cab-compressed",
+    [
+      #(0, <<"MSCF":utf8>>),
+      #(4, <<0, 0, 0, 0>>),
+    ],
+  ),
+  OleStream("application/msword", ["WordDocument"]),
+  OleStream("application/vnd.ms-excel", ["Workbook", "Book"]),
+  OleStream("application/vnd.ms-powerpoint", ["PowerPoint Document"]),
+  OleStream("application/x-ole-storage", []),
+  Bytes("application/wasm", [#(0, <<0x00, "asm":utf8>>)]),
+  Bytes("application/x-elf", [#(0, <<0x7F, "ELF":utf8>>)]),
+  Bytes("application/vnd.sqlite3", [#(0, <<"SQLite format 3":utf8, 0x00>>)]),
+  Bytes("application/vnd.apache.parquet", [#(0, <<"PAR1":utf8>>)]),
   Bytes("font/otf", [#(0, <<"OTTO":utf8>>)]),
   Bytes("font/collection", [#(0, <<"ttcf":utf8>>)]),
   Bytes("font/woff", [#(0, <<"wOFF":utf8>>)]),
   Bytes("font/woff2", [#(0, <<"wOF2":utf8>>)]),
   Bytes(
     "application/vnd.ms-fontobject",
-    [#(8, <<"LP":utf8>>), #(34, <<0x00, 0x00, 0x01>>)],
+    [
+      #(8, <<"LP":utf8>>),
+      #(34, <<0x00, 0x00, 0x01>>),
+    ],
   ),
   Bytes("font/ttf", [#(0, <<0x00, 0x01, 0x00, 0x00>>)]),
-  Bytes("audio/mpeg", [#(0, <<"ID3":utf8>>)]),
-  Check("audio/mpeg", has_mp3_frame_sync),
-  Check("audio/aac", has_aac_adts_sync),
+  // ID3v2: "ID3" and the major version, 2 to 4.
+  Bytes("audio/mpeg", [#(0, <<"ID3":utf8, 0x02>>)]),
+  Bytes("audio/mpeg", [#(0, <<"ID3":utf8, 0x03>>)]),
+  Bytes("audio/mpeg", [#(0, <<"ID3":utf8, 0x04>>)]),
+  // MPEG-1 Layer III and MPEG-2 Layer III frame sync, with and without CRC.
+  Bytes("audio/mpeg", [#(0, <<0xFF, 0xFB>>)]),
+  Bytes("audio/mpeg", [#(0, <<0xFF, 0xFA>>)]),
+  Bytes("audio/mpeg", [#(0, <<0xFF, 0xF3>>)]),
+  Bytes("audio/mpeg", [#(0, <<0xFF, 0xF2>>)]),
+  // ADTS: 12 sync bits, then the layer bits, which are always 00.
+  Bytes("audio/aac", [#(0, <<0xFF, 0xF1>>)]),
+  Bytes("audio/aac", [#(0, <<0xFF, 0xF0>>)]),
+  Bytes("audio/aac", [#(0, <<0xFF, 0xF9>>)]),
+  Bytes("audio/aac", [#(0, <<0xFF, 0xF8>>)]),
   Bytes("audio/aac", [#(0, <<"ADIF":utf8>>)]),
-  Bytes(
-    "audio/flac",
-    [#(0, <<0x66, 0x4C, 0x61, 0x43, 0x00, 0x00, 0x00, 0x22>>)],
-  ),
-  Bytes("audio/midi", [#(0, <<0x4D, 0x54, 0x68, 0x64>>)]),
+  Bytes("audio/flac", [#(0, <<"fLaC":utf8, 0x00, 0x00, 0x00, 0x22>>)]),
+  Bytes("audio/midi", [#(0, <<"MThd":utf8>>)]),
   Bytes("audio/amr", [#(0, <<"#!AMR":utf8, 0x0A>>)]),
   Bytes("audio/amr-wb", [#(0, <<"#!AMR-WB":utf8, 0x0A>>)]),
   Bytes("audio/ac3", [#(0, <<0x0B, 0x77>>)]),
-  Bytes("application/ogg", [#(0, <<0x4F, 0x67, 0x67, 0x53>>)]),
+  Bytes("application/ogg", [#(0, <<"OggS":utf8>>)]),
   Bytes(
     "application/vnd.ms-asf",
     [
@@ -191,26 +171,35 @@ const signatures = [
     ],
   ),
   Bytes("video/x-flv", [#(0, <<"FLV":utf8, 0x01>>)]),
-  Check("video/x-matroska", looks_like_matroska),
-  Check("video/webm", looks_like_webm),
+  EbmlDocType("video/matroska", "matroska"),
+  EbmlDocType("video/webm", "webm"),
   Check("application/zstd", has_zstd_frame),
   Bytes("application/x-tar", [#(257, <<"ustar":utf8>>)]),
-  Bytes("image/avif", [#(4, <<"ftyp":utf8>>), #(8, <<"avif":utf8>>)]),
-  Bytes("image/avif", [#(4, <<"ftyp":utf8>>), #(8, <<"avis":utf8>>)]),
-  Bytes("image/heic", [#(4, <<"ftyp":utf8>>), #(8, <<"heic":utf8>>)]),
-  Bytes("image/heic", [#(4, <<"ftyp":utf8>>), #(8, <<"heix":utf8>>)]),
-  Bytes("image/heic", [#(4, <<"ftyp":utf8>>), #(8, <<"hevc":utf8>>)]),
-  Bytes("audio/mp4", [#(4, <<"ftyp":utf8>>), #(8, <<"M4A ":utf8>>)]),
-  Bytes("audio/mp4", [#(4, <<"ftyp":utf8>>), #(8, <<"M4B ":utf8>>)]),
-  Bytes("audio/mp4", [#(4, <<"ftyp":utf8>>), #(8, <<"M4P ":utf8>>)]),
-  Bytes("video/quicktime", [#(4, <<"ftyp":utf8>>), #(8, <<"qt  ":utf8>>)]),
-  Check("video/mp4", looks_like_iso_bmff_video),
+  // ISO/IEC 23008-12 brands, then the audio-only MP4 brands, then 3GPP2
+  // before 3GPP because "3g2" also starts with "3g".
+  FtypBrand("image/avif", ["avif", "avis"]),
+  FtypBrand("image/heic", ["heic", "heix"]),
+  FtypBrand("image/heic-sequence", ["hevc", "hevx"]),
+  FtypBrand("image/heif", ["mif1"]),
+  FtypBrand("image/heif-sequence", ["msf1"]),
+  FtypBrand("audio/mp4", ["M4A ", "M4B ", "M4P ", "F4A ", "F4B ", "NDAS"]),
+  FtypBrand("video/quicktime", ["qt  "]),
+  FtypBrand("video/3gpp2", ["3g2"]),
+  FtypBrand("video/3gpp", ["3g"]),
+  // Every other brand (isom, mp41, mp42, M4V, f4v, dash, ...).
+  FtypBrand("video/mp4", [""]),
   Check("application/rtf", looks_like_rtf),
   Check("application/json", looks_like_json),
   Check("text/html", looks_like_html),
   Check("image/svg+xml", looks_like_svg),
-  Check("text/xml", looks_like_xml),
-  Check("application/x-deflate", has_zlib_magic),
+  Check("application/xml", looks_like_xml),
+  // RFC 1950: CMF 0x78 (deflate, 32K window) and one of the four FLG
+  // bytes that make CMF * 256 + FLG a multiple of 31. Short binary input
+  // that happens to start this way also matches, so it comes last.
+  Bytes("application/zlib", [#(0, <<0x78, 0x01>>)]),
+  Bytes("application/zlib", [#(0, <<0x78, 0x5E>>)]),
+  Bytes("application/zlib", [#(0, <<0x78, 0x9C>>)]),
+  Bytes("application/zlib", [#(0, <<0x78, 0xDA>>)]),
   Bytes("text/plain; charset=utf-32le", [#(0, <<0xFF, 0xFE, 0x00, 0x00>>)]),
   Bytes("text/plain; charset=utf-32be", [#(0, <<0x00, 0x00, 0xFE, 0xFF>>)]),
   Bytes("text/plain; charset=utf-16le", [#(0, <<0xFF, 0xFE>>)]),
@@ -218,847 +207,456 @@ const signatures = [
   Bytes("text/plain; charset=utf-8", [#(0, <<0xEF, 0xBB, 0xBF>>)]),
 ]
 
-// The printable-ASCII fallback lives outside `signatures` so
-// `detect_signature` does not have to filter it back out on every
-// call. `detect` falls through to it explicitly when no other
-// signature matches.
-const printable_ascii_fallback = Check("text/plain", looks_like_plain_text)
+const jpeg2000_box_size = <<0x00, 0x00, 0x00, 0x0C>>
 
-/// Try to recognize a MIME type from a leading byte signature.
-///
-/// Returns `Some(mime_type)` when a known signature matches and `None`
-/// otherwise.
-pub fn detect(bytes: BitArray) -> Option(String) {
-  case list.find_map(signatures, detect_match(bytes, _)) {
-    Ok(mime_type) -> Some(mime_type)
-    Error(Nil) ->
-      case detect_match(bytes, printable_ascii_fallback) {
-        Ok(mime_type) -> Some(mime_type)
-        Error(Nil) -> None
-      }
+const zip_local_header = <<"PK":utf8, 0x03, 0x04>>
+
+/// Returns the type of the first signature that matches, or `text/plain`
+/// when none does and the bytes look like text.
+pub fn detect(bytes: BitArray) -> Result(String, Nil) {
+  use <- result.lazy_or(detect_signature(bytes))
+  case looks_like_text(bytes) {
+    True -> Ok("text/plain")
+    False -> Error(Nil)
   }
 }
 
-/// Like `detect` but excludes the printable-ASCII heuristic.
-///
-/// Returns `Some(mime_type)` only for genuine signature matches: byte
-/// magic numbers (PNG, JPEG, ZIP, ...) and structural sniffs that
-/// inspect bytes (JSON, HTML, XML, SVG). Returns `None` for plain-ASCII
-/// payloads where `detect` would have returned `Some("text/plain")`.
-pub fn detect_signature(bytes: BitArray) -> Option(String) {
-  case list.find_map(signatures, detect_match(bytes, _)) {
-    Ok(mime_type) -> Some(mime_type)
-    Error(Nil) -> None
-  }
+/// Returns the type of the first signature that matches, without the
+/// `text/plain` fallback.
+pub fn detect_signature(bytes: BitArray) -> Result(String, Nil) {
+  list.find_map(signatures, fn(signature) {
+    case matches(bytes, signature) {
+      True -> Ok(mime_type(signature))
+      False -> Error(Nil)
+    }
+  })
 }
 
-fn detect_match(bytes: BitArray, signature: Signature) -> Result(String, Nil) {
-  let mime_type = signature_mime_type(signature)
-
-  use <- bool.guard(
-    when: matches_signature(bytes, signature),
-    return: Ok(mime_type),
-  )
-
-  Error(Nil)
-}
-
-fn signature_mime_type(signature: Signature) -> String {
+fn mime_type(signature: Signature) -> String {
   case signature {
-    Bytes(mime_type, _) -> mime_type
-    Check(mime_type, _) -> mime_type
+    Bytes(mime_type, _)
+    | StoredMimetype(mime_type)
+    | ZipEntries(mime_type, _)
+    | OleStream(mime_type, _)
+    | EbmlDocType(mime_type, _)
+    | FtypBrand(mime_type, _)
+    | Check(mime_type, _) -> mime_type
   }
 }
 
-fn matches_signature(bytes: BitArray, signature: Signature) -> Bool {
+fn matches(bytes: BitArray, signature: Signature) -> Bool {
   case signature {
     Bytes(_, segments) ->
       list.all(segments, fn(segment) {
-        let #(offset, pattern) = segment
-        has_bytes_at(bytes, offset, pattern)
+        has_bytes_at(bytes, segment.0, segment.1)
+      })
+    StoredMimetype(mime_type) ->
+      has_bytes_at(bytes, 0, zip_local_header)
+      && has_bytes_at(bytes, 30, <<"mimetype":utf8, mime_type:utf8>>)
+    ZipEntries(_, prefixes) -> {
+      let names = zip_entry_names(bytes, 0, zip_entry_budget, [])
+      list.all(prefixes, fn(prefix) {
+        list.any(names, string.starts_with(_, prefix))
+      })
+    }
+    OleStream(_, names) ->
+      has_bytes_at(bytes, 0, ole_header)
+      && {
+        names == []
+        || list.any(names, fn(name) {
+          contains(bytes, utf16le(name), bit_array.byte_size(bytes))
+        })
+      }
+    // The DocType element: ID 0x4282, a one-byte size, the name.
+    EbmlDocType(_, doc_type) ->
+      has_bytes_at(bytes, 0, ebml_header)
+      && contains(
+        bytes,
+        <<0x42, 0x82, { 0x80 + string.byte_size(doc_type) }, doc_type:utf8>>,
+        ebml_search_window,
+      )
+    FtypBrand(_, prefixes) ->
+      bit_array.byte_size(bytes) >= 12
+      && has_bytes_at(bytes, 4, <<"ftyp":utf8>>)
+      && list.any(prefixes, fn(prefix) {
+        has_bytes_at(bytes, 8, <<prefix:utf8>>)
       })
     Check(_, predicate) -> predicate(bytes)
   }
 }
 
-fn has_mp3_frame_sync(bytes: BitArray) -> Bool {
+fn has_bytes_at(bytes: BitArray, offset: Int, prefix: BitArray) -> Bool {
+  bit_array.slice(bytes, offset, bit_array.byte_size(prefix)) == Ok(prefix)
+}
+
+// Whether `literal` starts at one of the first `within` offsets.
+fn contains(bytes: BitArray, literal: BitArray, within: Int) -> Bool {
+  use <- bool.guard(when: within <= 0, return: False)
+  use <- bool.guard(when: has_bytes_at(bytes, 0, literal), return: True)
   case bytes {
-    <<0xFF, second:size(8), _:bits>>
-      if second == 0xFB || second == 0xFA || second == 0xF3 || second == 0xF2
-    -> True
+    <<_, rest:bytes>> -> contains(rest, literal, within - 1)
     _ -> False
   }
+}
+
+fn drop(bytes: BitArray, count: Int) -> BitArray {
+  bit_array.slice(bytes, count, bit_array.byte_size(bytes) - count)
+  |> result.unwrap(<<>>)
+}
+
+const ole_header = <<0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1>>
+
+const ebml_header = <<0x1A, 0x45, 0xDF, 0xA3>>
+
+const ebml_search_window = 256
+
+// OLE stream names are stored in UTF-16LE.
+fn utf16le(name: String) -> BitArray {
+  string.to_utf_codepoints(name)
+  |> list.map(fn(codepoint) {
+    <<string.utf_codepoint_to_int(codepoint):16-little>>
+  })
+  |> bit_array.concat
 }
 
 fn has_zstd_frame(bytes: BitArray) -> Bool {
   case bytes {
-    <<first:size(8), 0xB5, 0x2F, 0xFD, _:bits>>
-      if first >= 0x22 && first <= 0x28
-    -> True
-    <<first:size(8), 0x2A, 0x4D, 0x18, _:bits>>
-      if first >= 0x50 && first <= 0x5F
-    -> True
+    // Zstandard frame magic 0xFD2FB528, for format versions 0.2 to 0.8.
+    <<first, 0xB5, 0x2F, 0xFD, _:bits>> -> first >= 0x22 && first <= 0x28
+    // Skippable frame magic 0x184D2A50 to 0x184D2A5F.
+    <<first, 0x2A, 0x4D, 0x18, _:bits>> -> first >= 0x50 && first <= 0x5F
     _ -> False
   }
 }
 
-// ISO Base Media File Format catch-all for `video/mp4`.
-//
-// Reached only after the specific ftyp brand signatures (avif/avis, heic/heix/
-// hevc, M4A/M4B/M4P, qt) have been tried and missed. Any remaining file with
-// `ftyp` at offset 4 and a full 4-byte brand at offset 8 is treated as
-// `video/mp4` rather than rejected, so brands like `M4V `, `f4v `, `MSNV`,
-// `NDAS`, `dash`, `mp71`, etc. are no longer reported as
-// `application/octet-stream`.
-fn looks_like_iso_bmff_video(bytes: BitArray) -> Bool {
-  has_bytes_at(bytes, 4, <<"ftyp":utf8>>) && bit_array.byte_size(bytes) >= 12
-}
-
-fn has_bytes_at(bytes: BitArray, offset: Int, prefix: BitArray) -> Bool {
-  let prefix_size = bit_array.byte_size(prefix)
-  case offset < 0 || bit_array.byte_size(bytes) < offset + prefix_size {
-    True -> False
-    False ->
-      bit_array.slice(bytes, offset, prefix_size) |> result.unwrap(<<>>)
-      == prefix
+// RTF documents start with `{\rtfN`, N being the version digit.
+fn looks_like_rtf(bytes: BitArray) -> Bool {
+  case bytes {
+    <<"{\\rtf":utf8, version, _:bits>> -> version >= 0x30 && version <= 0x39
+    _ -> False
   }
 }
 
-// JSON sniffing: recognize `application/json` from leading bytes.
-//
-// Detection scope (top level): only `{...}` and `[...]` are sniffed. Bare
-// scalars (numbers, strings, `true`/`false`/`null`) at the top level are
-// rejected because they false-positive on plain text. Inside containers,
-// numbers and the literals are accepted as element values.
-//
-// Truncated input (e.g. `{"a": 1`) is accepted as JSON: structural validity
-// of the prefix is sufficient for sniffing. Junk after `{` (e.g.
-// `{ this is not json }`) is rejected because the object body requires `"`
-// or `}` after whitespace.
-//
-// Walking is bounded by `json_sniff_budget` so that arbitrarily large inputs
-// short-circuit once enough valid prefix has been observed.
+// ---------------------------------------------------------------------------
+// ZIP
+// ---------------------------------------------------------------------------
 
-const json_sniff_budget = 4096
+// Local file header: signature (4), version, flags, method, time, date
+// and CRC (14), compressed size (4), uncompressed size (4), name length
+// (2), extra field length (2), then the name. The next header follows
+// the name, the extra field and the compressed data.
+const zip_entry_budget = 20
 
-type JsonResult {
-  Valid(BitArray, Int)
+fn zip_entry_names(
+  bytes: BitArray,
+  offset: Int,
+  budget: Int,
+  names: List(String),
+) -> List(String) {
+  use <- bool.guard(when: budget <= 0, return: names)
+  case bit_array.slice(bytes, offset, 30) {
+    Ok(<<
+      0x50,
+      0x4B,
+      0x03,
+      0x04,
+      _:bytes-size(14),
+      size:32-little,
+      _:bytes-size(4),
+      name_size:16-little,
+      extra_size:16-little,
+    >>)
+      if name_size > 0
+    ->
+      case bit_array.slice(bytes, offset + 30, name_size) {
+        Ok(name) ->
+          zip_entry_names(
+            bytes,
+            offset + 30 + name_size + extra_size + size,
+            budget - 1,
+            [bit_array.to_string(name) |> result.unwrap(""), ..names],
+          )
+        Error(Nil) -> names
+      }
+    _ -> names
+  }
+}
+
+// ---------------------------------------------------------------------------
+// JSON
+// ---------------------------------------------------------------------------
+
+// Only an object or an array at the top level counts: a bare number or
+// string would match ordinary text. After the value only whitespace may
+// follow (RFC 8259: JSON-text = ws value ws). A value that the end of the
+// input cuts short still counts, because the caller passes only the first
+// 3072 bytes of a file.
+
+type Json {
+  Valid(rest: BitArray)
   Truncated
   Invalid
 }
 
-/// Match RTF documents by their literal `{\rtf<digit>` header.
-///
-/// The Rich Text Format spec requires every RTF document to begin
-/// with `{\rtfN` where `N` is an ASCII digit identifying the RTF
-/// version (`1` is the only widely-deployed value, but the spec
-/// allows any digit). The 6-byte sniff has no false-positive risk
-/// against any other widely-deployed format. Without this rule the
-/// `{\rtf...` prefix slid through to `looks_like_plain_text` because
-/// every byte in the header is printable ASCII, leaving real RTF
-/// uploads silently misdetected as `text/plain`. (#106 / #107)
-fn looks_like_rtf(bytes: BitArray) -> Bool {
-  case bytes {
-    <<0x7B, 0x5C, 0x72, 0x74, 0x66, version, _:bits>> ->
-      version >= 0x30 && version <= 0x39
-    _ -> False
-  }
-}
+// Containers nested deeper than this are accepted without reading
+// further, which keeps the recursion bounded on every target.
+const json_max_depth = 256
 
 fn looks_like_json(bytes: BitArray) -> Bool {
-  let stripped = charset.strip_utf8_bom(bytes)
-  let #(after_ws, budget) = json_skip_ws(stripped, json_sniff_budget)
-  case after_ws {
-    <<0x7B, rest:bits>> ->
-      json_finalize(json_validate_object(rest, budget - 1, True))
-    <<0x5B, rest:bits>> ->
-      json_finalize(json_validate_array(rest, budget - 1, True))
+  let bytes = bytes |> charset.strip_utf8_bom |> json_skip_ws
+  case bytes {
+    <<"{":utf8, _:bits>> | <<"[":utf8, _:bits>> ->
+      case json_value(bytes, 0) {
+        Valid(rest) -> json_skip_ws(rest) == <<>>
+        Truncated -> True
+        Invalid -> False
+      }
     _ -> False
   }
 }
 
-fn json_finalize(result: JsonResult) -> Bool {
-  case result {
-    Valid(_, _) -> True
-    Truncated -> True
-    Invalid -> False
-  }
-}
-
-fn json_skip_ws(bytes: BitArray, budget: Int) -> #(BitArray, Int) {
-  use <- bool.guard(when: budget <= 0, return: #(bytes, budget))
+fn json_skip_ws(bytes: BitArray) -> BitArray {
   case bytes {
-    <<0x20, rest:bits>> -> json_skip_ws(rest, budget - 1)
-    <<0x09, rest:bits>> -> json_skip_ws(rest, budget - 1)
-    <<0x0A, rest:bits>> -> json_skip_ws(rest, budget - 1)
-    <<0x0D, rest:bits>> -> json_skip_ws(rest, budget - 1)
-    _ -> #(bytes, budget)
+    <<0x20, rest:bits>>
+    | <<0x09, rest:bits>>
+    | <<0x0A, rest:bits>>
+    | <<0x0D, rest:bits>> -> json_skip_ws(rest)
+    _ -> bytes
   }
 }
 
-fn json_then(
-  result: JsonResult,
-  next: fn(BitArray, Int) -> JsonResult,
-) -> JsonResult {
+fn json_then(result: Json, next: fn(BitArray) -> Json) -> Json {
   case result {
-    Valid(rest, budget) -> next(rest, budget)
+    Valid(rest) -> next(rest)
     Truncated -> Truncated
     Invalid -> Invalid
   }
 }
 
-fn json_validate_value(bytes: BitArray, budget: Int) -> JsonResult {
-  use <- bool.lazy_guard(when: budget <= 0, return: fn() { Truncated })
-  let #(b, budget) = json_skip_ws(bytes, budget)
-  case b {
+fn json_value(bytes: BitArray, depth: Int) -> Json {
+  use <- bool.guard(when: depth >= json_max_depth, return: Truncated)
+  let bytes = json_skip_ws(bytes)
+  case bytes {
     <<>> -> Truncated
-    <<0x7B, rest:bits>> -> json_validate_object(rest, budget - 1, True)
-    <<0x5B, rest:bits>> -> json_validate_array(rest, budget - 1, True)
-    <<0x22, rest:bits>> -> json_skip_string(rest, budget - 1)
-    <<0x74, rest:bits>> -> json_match_literal(rest, <<"rue":utf8>>, budget - 1)
-    <<0x66, rest:bits>> -> json_match_literal(rest, <<"alse":utf8>>, budget - 1)
-    <<0x6E, rest:bits>> -> json_match_literal(rest, <<"ull":utf8>>, budget - 1)
-    <<0x2D, _:bits>> -> json_skip_number(b, budget)
-    <<x, _:bits>> if x >= 0x30 && x <= 0x39 -> json_skip_number(b, budget)
+    <<"{":utf8, rest:bits>> ->
+      json_container(rest, 0x7D, True, json_member(_, depth + 1))
+    <<"[":utf8, rest:bits>> ->
+      json_container(rest, 0x5D, True, json_value(_, depth + 1))
+    <<"\"":utf8, rest:bits>> -> json_string(rest)
+    <<"true":utf8, rest:bits>>
+    | <<"false":utf8, rest:bits>>
+    | <<"null":utf8, rest:bits>> -> Valid(rest)
+    <<"t":utf8, rest:bits>> -> json_literal_prefix(rest, <<"rue":utf8>>)
+    <<"f":utf8, rest:bits>> -> json_literal_prefix(rest, <<"alse":utf8>>)
+    <<"n":utf8, rest:bits>> -> json_literal_prefix(rest, <<"ull":utf8>>)
+    <<"-":utf8, rest:bits>> -> json_number(rest, True)
+    <<digit, _:bits>> if digit >= 0x30 && digit <= 0x39 ->
+      json_number(bytes, True)
     _ -> Invalid
   }
 }
 
-fn json_validate_object(
+// `close` ends the container; `member` reads one element.
+fn json_container(
   bytes: BitArray,
-  budget: Int,
-  expecting_first: Bool,
-) -> JsonResult {
-  let #(b, budget) = json_skip_ws(bytes, budget)
-  case b {
+  close: Int,
+  first: Bool,
+  member: fn(BitArray) -> Json,
+) -> Json {
+  let bytes = json_skip_ws(bytes)
+  case bytes {
     <<>> -> Truncated
-    <<0x7D, rest:bits>> -> {
-      use <- bool.guard(when: !expecting_first, return: Invalid)
-      Valid(rest, budget - 1)
-    }
-    <<0x22, rest:bits>> -> json_validate_object_member(rest, budget - 1)
-    _ -> Invalid
-  }
-}
-
-fn json_validate_object_member(bytes: BitArray, budget: Int) -> JsonResult {
-  use after_key, budget <- json_then(json_skip_string(bytes, budget))
-  let #(b, budget) = json_skip_ws(after_key, budget)
-  case b {
-    <<>> -> Truncated
-    <<0x3A, after_colon:bits>> -> {
-      use after_value, budget <- json_then(json_validate_value(
-        after_colon,
-        budget - 1,
-      ))
-      let #(b, budget) = json_skip_ws(after_value, budget)
-      case b {
-        <<>> -> Truncated
-        <<0x2C, rest:bits>> -> json_validate_object(rest, budget - 1, False)
-        <<0x7D, rest:bits>> -> Valid(rest, budget - 1)
-        _ -> Invalid
-      }
-    }
-    _ -> Invalid
-  }
-}
-
-fn json_validate_array(
-  bytes: BitArray,
-  budget: Int,
-  expecting_first: Bool,
-) -> JsonResult {
-  let #(b, budget) = json_skip_ws(bytes, budget)
-  case b {
-    <<>> -> Truncated
-    <<0x5D, rest:bits>> -> {
-      use <- bool.guard(when: !expecting_first, return: Invalid)
-      Valid(rest, budget - 1)
-    }
+    <<byte, rest:bits>> if first && byte == close -> Valid(rest)
     _ -> {
-      use after_value, budget <- json_then(json_validate_value(b, budget))
-      let #(b, budget) = json_skip_ws(after_value, budget)
-      case b {
+      use rest <- json_then(member(bytes))
+      case json_skip_ws(rest) {
         <<>> -> Truncated
-        <<0x2C, rest:bits>> -> json_validate_array(rest, budget - 1, False)
-        <<0x5D, rest:bits>> -> Valid(rest, budget - 1)
+        <<",":utf8, rest:bits>> -> json_container(rest, close, False, member)
+        <<byte, rest:bits>> if byte == close -> Valid(rest)
         _ -> Invalid
       }
     }
   }
 }
 
-fn json_skip_string(bytes: BitArray, budget: Int) -> JsonResult {
-  use <- bool.lazy_guard(when: budget <= 0, return: fn() { Truncated })
+fn json_member(bytes: BitArray, depth: Int) -> Json {
   case bytes {
-    <<>> -> Truncated
-    <<0x22, rest:bits>> -> Valid(rest, budget - 1)
-    <<0x5C, _esc, rest:bits>> -> json_skip_string(rest, budget - 2)
-    <<0x5C>> -> Truncated
-    <<_b, rest:bits>> -> json_skip_string(rest, budget - 1)
-    _ -> Invalid
-  }
-}
-
-fn json_skip_number(bytes: BitArray, budget: Int) -> JsonResult {
-  use <- bool.lazy_guard(when: budget <= 0, return: fn() { Truncated })
-  case bytes {
-    <<>> -> Truncated
-    <<0x2D, rest:bits>> -> json_skip_number_digits(rest, budget - 1)
-    <<b, _:bits>> if b >= 0x30 && b <= 0x39 ->
-      json_skip_number_digits(bytes, budget)
-    _ -> Invalid
-  }
-}
-
-fn json_skip_number_digits(bytes: BitArray, budget: Int) -> JsonResult {
-  use <- bool.lazy_guard(when: budget <= 0, return: fn() { Truncated })
-  case bytes {
-    <<>> -> Truncated
-    <<b, rest:bits>> if b >= 0x30 && b <= 0x39 ->
-      json_skip_number_digits(rest, budget - 1)
-    <<0x2E, rest:bits>> -> json_skip_number_digits(rest, budget - 1)
-    <<0x65, rest:bits>> -> json_skip_number_digits(rest, budget - 1)
-    <<0x45, rest:bits>> -> json_skip_number_digits(rest, budget - 1)
-    <<0x2B, rest:bits>> -> json_skip_number_digits(rest, budget - 1)
-    <<0x2D, rest:bits>> -> json_skip_number_digits(rest, budget - 1)
-    _ -> Valid(bytes, budget)
-  }
-}
-
-fn json_match_literal(
-  bytes: BitArray,
-  lit: BitArray,
-  budget: Int,
-) -> JsonResult {
-  case bytes, lit {
-    _, <<>> -> Valid(bytes, budget)
-    <<>>, _ -> Truncated
-    <<b, b_rest:bits>>, <<l, l_rest:bits>> -> {
-      use <- bool.guard(when: b != l, return: Invalid)
-      json_match_literal(b_rest, l_rest, budget - 1)
+    <<"\"":utf8, rest:bits>> -> {
+      use rest <- json_then(json_string(rest))
+      case json_skip_ws(rest) {
+        <<>> -> Truncated
+        <<":":utf8, rest:bits>> -> json_value(rest, depth)
+        _ -> Invalid
+      }
     }
-    _, _ -> Invalid
+    _ -> Invalid
   }
 }
 
-// HTML / XML sniffing per the WHATWG MIME Sniffing standard.
-//
-// `looks_like_html` recognizes inputs whose first non-whitespace token is
-// `<!doctype html` or one of a small set of common HTML tags, matched
-// case-insensitively and required to be followed by a tag-terminating byte
-// (whitespace, `>`, or end of input). The terminator requirement avoids
-// over-matching: `<address>` does not match the `<a` signature because
-// `d` is not a terminator.
-//
-// `looks_like_xml` recognizes inputs starting with the lowercase XML
-// declaration `<?xml` followed by a tag-terminating byte. The XML
-// declaration is case-sensitive per the XML 1.0 spec; uppercase variants
-// are not treated as XML.
-//
-// Both detectors strip an optional UTF-8 BOM and any leading HTML
-// whitespace before matching. UTF-16 / UTF-32 BOMs are deferred to the
-// dedicated text-plain detector (#20).
+fn json_string(bytes: BitArray) -> Json {
+  case bytes {
+    <<>> | <<"\\":utf8>> -> Truncated
+    <<"\"":utf8, rest:bits>> -> Valid(rest)
+    <<"\\":utf8, _, rest:bits>> -> json_string(rest)
+    <<_, rest:bits>> -> json_string(rest)
+    _ -> Invalid
+  }
+}
 
-const html_tag_signatures = [
+// Reads the rest of a number loosely: digits, `.`, `e`, `E`, `+`, `-`.
+fn json_number(bytes: BitArray, first: Bool) -> Json {
+  case bytes {
+    <<>> -> Truncated
+    <<byte, rest:bits>>
+      if { byte >= 0x30 && byte <= 0x39 }
+      || byte == 0x2E
+      || byte == 0x65
+      || byte == 0x45
+      || byte == 0x2B
+      || byte == 0x2D
+    -> json_number(rest, False)
+    _ if first -> Invalid
+    _ -> Valid(bytes)
+  }
+}
+
+// The input ended, or goes on with the rest of `literal`.
+fn json_literal_prefix(bytes: BitArray, literal: BitArray) -> Json {
+  let size = bit_array.byte_size(bytes)
+  case size < bit_array.byte_size(literal) {
+    True ->
+      case bit_array.slice(literal, 0, size) == Ok(bytes) {
+        True -> Truncated
+        False -> Invalid
+      }
+    False -> Invalid
+  }
+}
+
+// ---------------------------------------------------------------------------
+// HTML, XML and SVG
+// ---------------------------------------------------------------------------
+
+// The HTML patterns of WHATWG MIME Sniffing, compared without regard to
+// ASCII case. Each has to be followed by a tag-terminating byte.
+const html_patterns = [
+  <<"<!doctype html":utf8>>,
   <<"<html":utf8>>,
   <<"<head":utf8>>,
-  <<"<body":utf8>>,
   <<"<script":utf8>>,
   <<"<iframe":utf8>>,
-  <<"<table":utf8>>,
-  <<"<style":utf8>>,
-  <<"<title":utf8>>,
-  <<"<br":utf8>>,
-  <<"<p":utf8>>,
   <<"<h1":utf8>>,
   <<"<div":utf8>>,
   <<"<font":utf8>>,
-  <<"<img":utf8>>,
+  <<"<table":utf8>>,
   <<"<a":utf8>>,
+  <<"<style":utf8>>,
+  <<"<title":utf8>>,
+  <<"<b":utf8>>,
+  <<"<body":utf8>>,
+  <<"<br":utf8>>,
+  <<"<p":utf8>>,
+  <<"<!--":utf8>>,
 ]
 
 fn looks_like_html(bytes: BitArray) -> Bool {
-  let trimmed = trim_text_prefix(bytes)
-  use <- bool.lazy_guard(when: matches_html_doctype(trimmed), return: fn() {
-    True
+  let bytes = trim_text_prefix(bytes)
+  list.any(html_patterns, fn(pattern) {
+    case drop_ascii_case_insensitive(bytes, pattern) {
+      Ok(rest) -> is_tag_terminator(rest)
+      Error(Nil) -> False
+    }
   })
-  list.any(html_tag_signatures, fn(tag) { matches_html_tag(trimmed, tag) })
 }
 
+// WHATWG MIME Sniffing: the bytes `<?xml`.
 fn looks_like_xml(bytes: BitArray) -> Bool {
-  trim_text_prefix(bytes)
-  |> match_byte_prefix(<<"<?xml":utf8>>)
-  |> result.map(is_text_terminator)
-  |> result.unwrap(False)
+  has_bytes_at(trim_text_prefix(bytes), 0, <<"<?xml":utf8>>)
 }
 
-fn matches_html_doctype(bytes: BitArray) -> Bool {
-  match_ci_prefix(bytes, <<"<!doctype html":utf8>>)
-  |> result.map(is_text_terminator)
-  |> result.unwrap(False)
-}
-
-fn matches_html_tag(bytes: BitArray, tag: BitArray) -> Bool {
-  match_ci_prefix(bytes, tag)
-  |> result.map(is_text_terminator)
-  |> result.unwrap(False)
-}
-
-fn trim_text_prefix(bytes: BitArray) -> BitArray {
-  bytes
-  |> charset.strip_utf8_bom
-  |> charset.skip_whitespace
-}
-
-fn is_text_terminator(bytes: BitArray) -> Bool {
-  case bytes {
-    <<>> -> True
-    <<0x20, _:bits>> -> True
-    <<0x09, _:bits>> -> True
-    <<0x0A, _:bits>> -> True
-    <<0x0C, _:bits>> -> True
-    <<0x0D, _:bits>> -> True
-    <<0x3E, _:bits>> -> True
+// An `<svg` root element after any XML declaration, comments and
+// DOCTYPE. XML names are case-sensitive, so `<SVG>` is not SVG.
+fn looks_like_svg(bytes: BitArray) -> Bool {
+  case bytes |> trim_text_prefix |> skip_prolog {
+    <<"<svg":utf8, rest:bits>> ->
+      case rest {
+        <<"/":utf8, _:bits>> -> True
+        _ -> is_tag_terminator(rest)
+      }
     _ -> False
   }
 }
 
-fn match_ci_prefix(bytes: BitArray, prefix: BitArray) -> Result(BitArray, Nil) {
-  case prefix, bytes {
-    <<>>, _ -> Ok(bytes)
-    _, <<>> -> Error(Nil)
-    <<p, p_rest:bits>>, <<b, b_rest:bits>> -> {
-      use <- bool.lazy_guard(
-        when: ascii_to_lower(b) != ascii_to_lower(p),
-        return: fn() { Error(Nil) },
-      )
-      match_ci_prefix(b_rest, p_rest)
-    }
-    _, _ -> Error(Nil)
+fn skip_prolog(bytes: BitArray) -> BitArray {
+  let bytes = charset.skip_whitespace(bytes)
+  case bytes {
+    <<"<?xml":utf8, rest:bits>> ->
+      rest |> skip_past(<<"?>":utf8>>) |> skip_prolog
+    <<"<!--":utf8, rest:bits>> ->
+      rest |> skip_past(<<"-->":utf8>>) |> skip_prolog
+    <<"<!DOCTYPE":utf8, rest:bits>> ->
+      rest |> skip_past(<<">":utf8>>) |> skip_prolog
+    _ -> bytes
   }
 }
 
-fn match_byte_prefix(
+// Drops everything up to and including `literal`, or everything when it
+// does not occur.
+fn skip_past(bytes: BitArray, literal: BitArray) -> BitArray {
+  case has_bytes_at(bytes, 0, literal), bytes {
+    True, _ -> drop(bytes, bit_array.byte_size(literal))
+    False, <<_, rest:bytes>> -> skip_past(rest, literal)
+    False, _ -> <<>>
+  }
+}
+
+fn trim_text_prefix(bytes: BitArray) -> BitArray {
+  bytes |> charset.strip_utf8_bom |> charset.skip_whitespace
+}
+
+// Whitespace or `>`. WHATWG names only space and `>`; the other HTML
+// whitespace bytes are accepted too, since `<html\n` is common.
+fn is_tag_terminator(bytes: BitArray) -> Bool {
+  case bytes {
+    <<byte, _:bits>> ->
+      byte == 0x20
+      || byte == 0x09
+      || byte == 0x0A
+      || byte == 0x0C
+      || byte == 0x0D
+      || byte == 0x3E
+    _ -> False
+  }
+}
+
+// Drops `prefix`, a lowercase pattern, from the start of `bytes`,
+// comparing ASCII letters without regard to case.
+fn drop_ascii_case_insensitive(
   bytes: BitArray,
   prefix: BitArray,
 ) -> Result(BitArray, Nil) {
   case prefix, bytes {
     <<>>, _ -> Ok(bytes)
-    _, <<>> -> Error(Nil)
-    <<p, p_rest:bits>>, <<b, b_rest:bits>> -> {
-      use <- bool.lazy_guard(when: b != p, return: fn() { Error(Nil) })
-      match_byte_prefix(b_rest, p_rest)
-    }
+    <<expected, prefix:bits>>, <<byte, bytes:bits>> ->
+      case
+        byte == expected
+        || byte + 0x20 == expected
+        && byte >= 0x41
+        && byte <= 0x5A
+      {
+        True -> drop_ascii_case_insensitive(bytes, prefix)
+        False -> Error(Nil)
+      }
     _, _ -> Error(Nil)
   }
 }
 
-fn ascii_to_lower(byte: Int) -> Int {
-  use <- bool.guard(when: byte < 0x41 || byte > 0x5A, return: byte)
-  byte + 32
-}
+// ---------------------------------------------------------------------------
+// Text
+// ---------------------------------------------------------------------------
 
-// SVG sniffing: distinguish SVG from generic XML by looking for an `<svg`
-// root element. The XML declaration, DOCTYPE, comments, and whitespace
-// between them are skipped before the root-element check so that real-world
-// SVG files (which often start with a UTF-8 BOM, an `<?xml ?>` prolog, and
-// a `<!DOCTYPE svg ...>` declaration) are recognized.
-//
-// The `<svg` match is case-sensitive: XML element names are case-sensitive
-// per the XML 1.0 spec, so `<SVG>` is not SVG. The match also requires a
-// terminator that includes `/` so that self-closing `<svg/>` works.
-//
-// Walking is bounded by `svg_sniff_budget` to cap work on pathological
-// inputs (huge comments, huge DOCTYPE, etc.).
-
-const svg_sniff_budget = 4096
-
-fn looks_like_svg(bytes: BitArray) -> Bool {
-  let bytes = trim_text_prefix(bytes)
-  let bytes = skip_xml_prolog(bytes, svg_sniff_budget)
-  let bytes = skip_xml_misc(bytes, svg_sniff_budget)
-  match_byte_prefix(bytes, <<"<svg":utf8>>)
-  |> result.map(is_xml_element_terminator)
-  |> result.unwrap(False)
-}
-
-fn is_xml_element_terminator(bytes: BitArray) -> Bool {
-  case bytes {
-    <<0x2F, _:bits>> -> True
-    _ -> is_text_terminator(bytes)
-  }
-}
-
-fn skip_xml_prolog(bytes: BitArray, budget: Int) -> BitArray {
-  match_byte_prefix(bytes, <<"<?xml":utf8>>)
-  |> result.map(skip_until_literal(_, <<"?>":utf8>>, budget))
-  |> result.unwrap(bytes)
-}
-
-fn skip_xml_misc(bytes: BitArray, budget: Int) -> BitArray {
-  use <- bool.guard(when: budget <= 0, return: bytes)
-  let trimmed = charset.skip_whitespace(bytes)
-  use <- bool.lazy_guard(
-    when: starts_with_literal(trimmed, <<"<!--":utf8>>),
-    return: fn() {
-      skip_until_literal(trimmed, <<"-->":utf8>>, budget)
-      |> skip_xml_misc(budget - 1)
-    },
-  )
-  use <- bool.lazy_guard(
-    when: starts_with_literal(trimmed, <<"<!DOCTYPE":utf8>>),
-    return: fn() {
-      skip_until_literal(trimmed, <<">":utf8>>, budget)
-      |> skip_xml_misc(budget - 1)
-    },
-  )
-  trimmed
-}
-
-fn skip_until_literal(
-  bytes: BitArray,
-  literal: BitArray,
-  budget: Int,
-) -> BitArray {
-  use <- bool.guard(when: budget <= 0, return: bytes)
-  case starts_with_literal(bytes, literal) {
-    True ->
-      match_byte_prefix(bytes, literal)
-      |> result.unwrap(bytes)
-    False ->
-      case bytes {
-        <<>> -> bytes
-        <<_, rest:bits>> -> skip_until_literal(rest, literal, budget - 1)
-        _ -> bytes
-      }
-  }
-}
-
-fn starts_with_literal(bytes: BitArray, literal: BitArray) -> Bool {
-  match_byte_prefix(bytes, literal) |> result.is_ok
-}
-
-fn has_lzh_magic(bytes: BitArray) -> Bool {
-  // LZH/LHA: `??-lh?-` where bytes 0-1 are size, 2-4 are `-lh`, 5 is the
-  // method digit, and 6 is the trailing `-`. We match the fixed parts and
-  // accept any byte at position 5.
-  has_bytes_at(bytes, 2, <<"-lh":utf8>>) && has_bytes_at(bytes, 6, <<"-":utf8>>)
-}
-
-// OLE Compound File Binary (CFB) detection.
-//
-// The CFB header is 8 bytes: D0 CF 11 E0 A1 B1 1A E1.
-// To distinguish Word/Excel/PowerPoint we scan for UTF-16LE encoded
-// stream names in the leading bytes (typically within the first 2 KB).
-
-const ole_cfb_header = <<0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1>>
-
-// "WordDocument" in UTF-16LE
-const ole_word_marker = <<
-  0x57, 0x00, 0x6F, 0x00, 0x72, 0x00, 0x64, 0x00, 0x44, 0x00, 0x6F, 0x00, 0x63,
-  0x00, 0x75, 0x00, 0x6D, 0x00, 0x65, 0x00, 0x6E, 0x00, 0x74, 0x00,
->>
-
-// "Workbook" in UTF-16LE
-const ole_workbook_marker = <<
-  0x57, 0x00, 0x6F, 0x00, 0x72, 0x00, 0x6B, 0x00, 0x62, 0x00, 0x6F, 0x00, 0x6F,
-  0x00, 0x6B, 0x00,
->>
-
-// "Book" in UTF-16LE (older Excel format)
-const ole_book_marker = <<0x42, 0x00, 0x6F, 0x00, 0x6F, 0x00, 0x6B, 0x00>>
-
-// "PowerPoint Document" in UTF-16LE
-const ole_powerpoint_marker = <<
-  0x50, 0x00, 0x6F, 0x00, 0x77, 0x00, 0x65, 0x00, 0x72, 0x00, 0x50, 0x00, 0x6F,
-  0x00, 0x69, 0x00, 0x6E, 0x00, 0x74, 0x00, 0x20, 0x00, 0x44, 0x00, 0x6F, 0x00,
-  0x63, 0x00, 0x75, 0x00, 0x6D, 0x00, 0x65, 0x00, 0x6E, 0x00, 0x74, 0x00,
->>
-
-fn has_ole_header(bytes: BitArray) -> Bool {
-  has_bytes_at(bytes, 0, ole_cfb_header)
-}
-
-fn ole_contains_marker(bytes: BitArray, marker: BitArray) -> Bool {
-  ole_scan_for_marker(bytes, marker, 0)
-}
-
-fn ole_scan_for_marker(bytes: BitArray, marker: BitArray, offset: Int) -> Bool {
-  let marker_size = bit_array.byte_size(marker)
-  let bytes_size = bit_array.byte_size(bytes)
-  case offset + marker_size > bytes_size {
-    True -> False
-    False ->
-      case has_bytes_at(bytes, offset, marker) {
-        True -> True
-        False -> ole_scan_for_marker(bytes, marker, offset + 1)
-      }
-  }
-}
-
-fn looks_like_ole_word(bytes: BitArray) -> Bool {
-  has_ole_header(bytes) && ole_contains_marker(bytes, ole_word_marker)
-}
-
-fn looks_like_ole_excel(bytes: BitArray) -> Bool {
-  has_ole_header(bytes)
-  && {
-    ole_contains_marker(bytes, ole_workbook_marker)
-    || ole_contains_marker(bytes, ole_book_marker)
-  }
-}
-
-fn looks_like_ole_powerpoint(bytes: BitArray) -> Bool {
-  has_ole_header(bytes) && ole_contains_marker(bytes, ole_powerpoint_marker)
-}
-
-fn looks_like_ole_cfb(bytes: BitArray) -> Bool {
-  has_ole_header(bytes)
-}
-
-// ZIP-based format detection.
-//
-// ZIP local file header layout:
-//   Offset 0:  signature  PK\x03\x04  (4 bytes)
-//   Offset 26: filename length         (2 bytes, little-endian)
-//   Offset 28: extra field length      (2 bytes, little-endian)
-//   Offset 30: filename                (variable)
-//
-// After filename + extra + compressed data comes the next local file header.
-// We walk a few entries to collect filenames and decide the format.
-
-const zip_local_header = <<0x50, 0x4B, 0x03, 0x04>>
-
-fn has_zip_header(bytes: BitArray) -> Bool {
-  has_bytes_at(bytes, 0, zip_local_header)
-}
-
-/// Extract filenames from ZIP local file headers (up to budget entries).
-fn zip_collect_filenames(
-  bytes: BitArray,
-  offset: Int,
-  budget: Int,
-  acc: List(String),
-) -> List(String) {
-  use <- bool.guard(
-    when: budget <= 0 || offset + 30 > bit_array.byte_size(bytes),
-    return: acc,
-  )
-  use <- bool.guard(
-    when: !has_bytes_at(bytes, offset, zip_local_header),
-    return: acc,
-  )
-  case zip_read_entry_info(bytes, offset) {
-    Error(Nil) -> acc
-    Ok(#(filename, next_offset)) ->
-      zip_collect_filenames(bytes, next_offset, budget - 1, [filename, ..acc])
-  }
-}
-
-fn zip_read_entry_info(
-  bytes: BitArray,
-  offset: Int,
-) -> Result(#(String, Int), Nil) {
-  let size = bit_array.byte_size(bytes)
-  use <- bool.guard(when: offset + 30 > size, return: Error(Nil))
-  use comp_size_bits <- result.try(bit_array.slice(bytes, offset + 18, 4))
-  use fname_len_bits <- result.try(bit_array.slice(bytes, offset + 26, 2))
-  use extra_len_bits <- result.try(bit_array.slice(bytes, offset + 28, 2))
-  let compressed_size = le_u32(comp_size_bits)
-  let fname_len = le_u16(fname_len_bits)
-  let extra_len = le_u16(extra_len_bits)
-  use <- bool.guard(
-    when: fname_len <= 0 || offset + 30 + fname_len > size,
-    return: Error(Nil),
-  )
-  use fname_bytes <- result.try(bit_array.slice(bytes, offset + 30, fname_len))
-  let filename = bit_array.to_string(fname_bytes) |> result.unwrap("")
-  let next = offset + 30 + fname_len + extra_len + compressed_size
-  Ok(#(filename, next))
-}
-
-fn le_u16(bytes: BitArray) -> Int {
-  case bytes {
-    <<lo, hi>> -> hi * 256 + lo
-    _ -> 0
-  }
-}
-
-fn le_u32(bytes: BitArray) -> Int {
-  case bytes {
-    <<b0, b1, b2, b3>> -> b3 * 16_777_216 + b2 * 65_536 + b1 * 256 + b0
-    _ -> 0
-  }
-}
-
-fn zip_filenames_contain(filenames: List(String), prefix: String) -> Bool {
-  list.any(filenames, fn(name) { string.starts_with(name, prefix) })
-}
-
-const zip_stored_mimetype_entry_name = <<"mimetype":utf8>>
-
-fn looks_like_zip_with_stored_mimetype(
-  bytes: BitArray,
-  expected_mime_type: BitArray,
-) -> Bool {
-  use <- bool.guard(when: !has_zip_header(bytes), return: False)
-  let filename_offset = 30
-  let content_offset =
-    filename_offset + bit_array.byte_size(zip_stored_mimetype_entry_name)
-  has_bytes_at(bytes, filename_offset, zip_stored_mimetype_entry_name)
-  && has_bytes_at(bytes, content_offset, expected_mime_type)
-}
-
-fn looks_like_epub(bytes: BitArray) -> Bool {
-  // EPUB requires "mimetype" as the first entry, stored uncompressed at
-  // offset 30, with content "application/epub+zip".
-  looks_like_zip_with_stored_mimetype(bytes, <<"application/epub+zip":utf8>>)
-}
-
-fn looks_like_odt(bytes: BitArray) -> Bool {
-  looks_like_zip_with_stored_mimetype(bytes, <<
-    "application/vnd.oasis.opendocument.text":utf8,
-  >>)
-}
-
-fn looks_like_ods(bytes: BitArray) -> Bool {
-  looks_like_zip_with_stored_mimetype(bytes, <<
-    "application/vnd.oasis.opendocument.spreadsheet":utf8,
-  >>)
-}
-
-fn looks_like_odp(bytes: BitArray) -> Bool {
-  looks_like_zip_with_stored_mimetype(bytes, <<
-    "application/vnd.oasis.opendocument.presentation":utf8,
-  >>)
-}
-
-fn looks_like_jar(bytes: BitArray) -> Bool {
-  use <- bool.guard(when: !has_zip_header(bytes), return: False)
-  let filenames = zip_collect_filenames(bytes, 0, 20, [])
-  zip_filenames_contain(filenames, "META-INF/MANIFEST.MF")
-}
-
-fn looks_like_apk(bytes: BitArray) -> Bool {
-  use <- bool.guard(when: !has_zip_header(bytes), return: False)
-  let filenames = zip_collect_filenames(bytes, 0, 20, [])
-  zip_filenames_contain(filenames, "AndroidManifest.xml")
-}
-
-fn looks_like_docx(bytes: BitArray) -> Bool {
-  use <- bool.guard(when: !has_zip_header(bytes), return: False)
-  let filenames = zip_collect_filenames(bytes, 0, 20, [])
-  zip_filenames_contain(filenames, "[Content_Types].xml")
-  && zip_filenames_contain(filenames, "word/")
-}
-
-fn looks_like_xlsx(bytes: BitArray) -> Bool {
-  use <- bool.guard(when: !has_zip_header(bytes), return: False)
-  let filenames = zip_collect_filenames(bytes, 0, 20, [])
-  zip_filenames_contain(filenames, "[Content_Types].xml")
-  && zip_filenames_contain(filenames, "xl/")
-}
-
-fn looks_like_pptx(bytes: BitArray) -> Bool {
-  use <- bool.guard(when: !has_zip_header(bytes), return: False)
-  let filenames = zip_collect_filenames(bytes, 0, 20, [])
-  zip_filenames_contain(filenames, "[Content_Types].xml")
-  && zip_filenames_contain(filenames, "ppt/")
-}
-
-fn has_zlib_magic(bytes: BitArray) -> Bool {
-  // RFC 1950 zlib stream: first byte 0x78 (CMF for deflate, 32K window),
-  // second byte one of the four valid (FLEVEL, FDICT) combinations whose
-  // CMF*256 + FLG is a multiple of 31. The check is heuristic — short
-  // binary inputs that happen to start with these bytes will false-positive.
-  // Placed at the end of `signatures` so this only fires when nothing else
-  // matched.
-  case bytes {
-    <<0x78, second:size(8), _:bits>>
-      if second == 0x01 || second == 0x5E || second == 0x9C || second == 0xDA
-    -> True
-    _ -> False
-  }
-}
-
-fn has_aac_adts_sync(bytes: BitArray) -> Bool {
-  // ADTS sync = 12 bits all 1, then ID (1 bit), Layer (2 bits, must be 00),
-  // protection_absent (1 bit). Valid second-byte values (high nibble 0xF
-  // plus low nibble where bits 5-4 = 00): 0xF0, 0xF1, 0xF8, 0xF9.
-  case bytes {
-    <<0xFF, second:size(8), _:bits>>
-      if second == 0xF0 || second == 0xF1 || second == 0xF8 || second == 0xF9
-    -> True
-    _ -> False
-  }
-}
-
-const matroska_doctype = <<0x42, 0x82, 0x88, "matroska":utf8>>
-
-const webm_doctype = <<0x42, 0x82, 0x84, "webm":utf8>>
-
-const ebml_search_budget = 256
-
-fn looks_like_matroska(bytes: BitArray) -> Bool {
-  case bytes {
-    <<0x1A, 0x45, 0xDF, 0xA3, _:bits>> ->
-      contains_literal(bytes, matroska_doctype, ebml_search_budget)
-    _ -> False
-  }
-}
-
-fn looks_like_webm(bytes: BitArray) -> Bool {
-  case bytes {
-    <<0x1A, 0x45, 0xDF, 0xA3, _:bits>> ->
-      contains_literal(bytes, webm_doctype, ebml_search_budget)
-    _ -> False
-  }
-}
-
-fn contains_literal(bytes: BitArray, literal: BitArray, budget: Int) -> Bool {
-  use <- bool.guard(when: budget <= 0, return: False)
-  use <- bool.lazy_guard(
-    when: starts_with_literal(bytes, literal),
-    return: fn() { True },
-  )
-  case bytes {
-    <<>> -> False
-    <<_, rest:bits>> -> contains_literal(rest, literal, budget - 1)
-    _ -> False
-  }
-}
-
-// Plain-text fallback: when no other signature matched, classify the input
-// as `text/plain` if the leading bytes are entirely printable ASCII or HTML
-// whitespace. Per WHATWG MIME Sniffing's binary-vs-text rule, the presence
-// of any C0 control byte (other than tab/LF/FF/CR), 0x7F, or any high byte
-// (0x80–0xFF) marks the input as binary. The check is bounded by
-// `text_sniff_budget` so that long text files terminate quickly.
-
-const text_sniff_budget = 1024
-
-fn looks_like_plain_text(bytes: BitArray) -> Bool {
-  use <- bool.guard(when: bytes == <<>>, return: False)
-  is_all_text_bytes(bytes, text_sniff_budget)
-}
-
-fn is_all_text_bytes(bytes: BitArray, budget: Int) -> Bool {
-  use <- bool.guard(when: budget <= 0, return: True)
-  case bytes {
-    <<>> -> True
-    <<b, rest:bits>> -> {
-      use <- bool.guard(when: !is_text_byte(b), return: False)
-      is_all_text_bytes(rest, budget - 1)
-    }
-    _ -> False
-  }
-}
-
-fn is_text_byte(byte: Int) -> Bool {
-  byte == 0x09
-  || byte == 0x0A
-  || byte == 0x0C
-  || byte == 0x0D
-  || { byte >= 0x20 && byte <= 0x7E }
+// WHATWG MIME Sniffing: a resource is binary when it holds a binary data
+// byte. Every byte is checked.
+fn looks_like_text(bytes: BitArray) -> Bool {
+  !charset.has_binary_data_byte(bytes)
 }

@@ -3,7 +3,8 @@
 //// - Differential: `accept.negotiate` against a small reference
 ////   model of RFC 9110 §12.5.1 written here, where the most specific
 ////   matching media range decides an offer's q-value (so `text/html;q=0`
-////   excludes text/html even with `*/*` present).
+////   excludes text/html even with `*/*` present), and a `type/subtype`
+////   range with a parameter matches only offers that carry it.
 //// - Metamorphic: the order of the client's entries never changes the
 ////   result, the result is always one of the offers, and dropping offers
 ////   other than the chosen one keeps it chosen.
@@ -21,8 +22,9 @@ import metamon/generator/range
 import mimetype
 import mimetype/accept
 
+/// `parameter` adds `x=1` to the range, after the weight.
 type Entry {
-  Entry(range: String, ext: Bool, quality: Option(String))
+  Entry(range: String, parameter: Bool, quality: Option(String))
 }
 
 const ranges = [
@@ -32,7 +34,7 @@ const ranges = [
 
 const offer_pool = [
   "text/html", "text/plain", "application/json", "image/png", "image/webp",
-  "application/xml",
+  "application/xml", "text/html; x=1", "image/png; x=1",
 ]
 
 fn entry_gen() -> Generator(Entry) {
@@ -67,17 +69,16 @@ fn offers_gen() -> Generator(List(String)) {
 fn render(entries: List(Entry)) -> String {
   entries
   |> list.map(fn(e) {
-    // An accept-ext must follow q, so a q-less entry gets q=1 first.
-    let q_param = case e.quality, e.ext {
-      Some(raw), _ -> ";q=" <> raw
-      None, True -> ";q=1"
-      None, False -> ""
+    // RFC 9110 reads any `q` as the weight, so the parameter can follow it.
+    let q_param = case e.quality {
+      Some(raw) -> ";q=" <> raw
+      None -> ""
     }
-    let ext = case e.ext {
+    let parameter = case e.parameter {
       True -> ";x=1"
       False -> ""
     }
-    e.range <> q_param <> ext
+    e.range <> q_param <> parameter
   })
   |> string.join(", ")
 }
@@ -100,34 +101,34 @@ fn result_to_float(r: Result(Int, Nil)) -> Float {
   }
 }
 
-fn specificity(range: String) -> Int {
-  case range {
-    "*/*" -> 1
-    _ ->
-      case string.ends_with(range, "/*") {
-        True -> 2
-        False -> 3
-      }
+fn is_specific(range: String) -> Bool {
+  range != "*/*" && !string.ends_with(range, "/*")
+}
+
+// Wildcard ranges ignore their parameters.
+fn precedence(e: Entry) -> Int {
+  case e.range, is_specific(e.range), e.parameter {
+    "*/*", _, _ -> 0
+    _, False, _ -> 1
+    _, True, False -> 2
+    _, True, True -> 3
   }
 }
 
-fn matches(range: String, offer: String) -> Bool {
-  case range {
-    "*/*" -> True
-    _ ->
-      case string.ends_with(range, "/*") {
-        True -> string.starts_with(offer, string.drop_end(range, 1))
-        False -> range == offer
-      }
+fn matches(e: Entry, offer: String) -> Bool {
+  let #(essence, offer_has_parameter) = case string.split_once(offer, "; ") {
+    Ok(#(essence, _)) -> #(essence, True)
+    Error(Nil) -> #(offer, False)
+  }
+  case e.range, is_specific(e.range) {
+    "*/*", _ -> True
+    range, False -> string.starts_with(essence, string.drop_end(range, 1))
+    range, True -> range == essence && { !e.parameter || offer_has_parameter }
   }
 }
 
 fn entry_key(e: Entry) -> #(Int, Int) {
-  let ext = case e.ext {
-    True -> 1
-    False -> 0
-  }
-  #(specificity(e.range), ext)
+  #(precedence(e), 0)
 }
 
 fn more_specific(a: Entry, b: Entry) -> Entry {
@@ -144,7 +145,7 @@ fn score_offer(
   offer: String,
   index: Int,
 ) -> Result(#(Float, #(Int, Int), Int, String), Nil) {
-  let matching = list.filter(entries, fn(e) { matches(e.range, offer) })
+  let matching = list.filter(entries, fn(e) { matches(e, offer) })
   use best <- result.try(list.reduce(matching, more_specific))
   let quality = q_of(best)
   case quality >. 0.0 {
@@ -162,9 +163,8 @@ fn compare_scores(
   int.compare(a.2, b.2)
 }
 
-/// Reference model of RFC 9110 §12.5.1. Offers are ranked by (q,
-/// specificity, extension count) of their most specific match and then
-/// by server order.
+/// Reference model of RFC 9110 §12.5.1. Offers are ranked by the q and
+/// precedence of their most specific match and then by server order.
 fn reference(
   entries: List(Entry),
   offers: List(String),

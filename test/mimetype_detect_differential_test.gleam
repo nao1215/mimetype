@@ -1,9 +1,10 @@
 //// Differential tests for detection against independent implementations.
 ////
 //// - `detect_charset` falls back to a UTF-8 validity scan. For byte strings
-////   without a BOM or a markup declaration it must say `us-ascii` exactly
-////   when every byte is below 0x80, `utf-8` exactly when the standard
-////   library accepts the bytes as UTF-8, and nothing otherwise. The inputs
+////   without a BOM or a markup declaration it must say nothing when a
+////   WHATWG binary data byte is present, `us-ascii` exactly when every
+////   byte is below 0x80, `utf-8` exactly when the standard library accepts
+////   the bytes as UTF-8, and nothing otherwise. The inputs
 ////   mix boundary code points (U+0080, U+07FF, U+0800, U+FFFF, U+10000,
 ////   U+10FFFF, around the surrogates) with overlong forms, encoded
 ////   surrogates, stray continuation bytes and truncated sequences.
@@ -65,6 +66,24 @@ fn text_gen() -> Generator(BitArray) {
   |> generator.map(fn(pieces) { bit_array.concat([<<"x":utf8>>, ..pieces]) })
 }
 
+// WHATWG MIME Sniffing's binary data bytes.
+fn any_binary_byte(bytes: BitArray) -> Bool {
+  case bytes {
+    <<>> -> False
+    <<b, rest:bytes>> ->
+      list.contains(binary_bytes(), b) || any_binary_byte(rest)
+    _ -> False
+  }
+}
+
+fn binary_bytes() -> List(Int) {
+  [
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0B, 0x0E, 0x0F, 0x10,
+    0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1C, 0x1D, 0x1E,
+    0x1F,
+  ]
+}
+
 fn all_ascii(bytes: BitArray) -> Bool {
   case bytes {
     <<>> -> True
@@ -75,10 +94,15 @@ fn all_ascii(bytes: BitArray) -> Bool {
 
 pub fn detect_charset_utf8_scan_matches_the_standard_library_test() -> Nil {
   metamon.forall(text_gen(), fn(bytes) {
-    let expected = case all_ascii(bytes), bit_array.to_string(bytes) {
-      True, _ -> Ok("us-ascii")
-      False, Ok(_) -> Ok("utf-8")
-      False, Error(Nil) -> Error(Nil)
+    let expected = case
+      any_binary_byte(bytes),
+      all_ascii(bytes),
+      bit_array.to_string(bytes)
+    {
+      True, _, _ -> Error(Nil)
+      False, True, _ -> Ok("us-ascii")
+      False, False, Ok(_) -> Ok("utf-8")
+      False, False, Error(Nil) -> Error(Nil)
     }
     let actual = case mimetype.detect_charset(bytes) {
       Ok(charset) -> Ok(charset)

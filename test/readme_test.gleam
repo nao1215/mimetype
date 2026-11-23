@@ -66,8 +66,10 @@ pub fn readme_response_type_test() {
   assert response_type("image/*") == Error(Nil)
 }
 
-pub fn readme_utf8_text_without_bom_is_not_detected_test() {
-  assert mimetype.detect(<<"こんにちは":utf8>>) == Error(Nil)
+pub fn readme_text_without_a_signature_is_text_plain_test() {
+  assert mimetype.detect(<<"こんにちは":utf8>>)
+    |> result.map(mimetype.to_string)
+    == Ok("text/plain")
   assert mimetype.detect_charset(<<"こんにちは":utf8>>) == Ok("utf-8")
 }
 
@@ -134,8 +136,8 @@ pub fn doc_accept_test() {
   let json = mime("application/json")
   assert accept.parse("text/html, */*;q=0.1")
     == Ok([
-      accept.AcceptItem(accept.Specific(html), quality: 1.0, extensions: []),
-      accept.AcceptItem(accept.AnyType, quality: 0.1, extensions: []),
+      accept.AcceptItem(accept.Specific(html), quality: 1.0),
+      accept.AcceptItem(accept.AnyType, quality: 0.1),
     ])
   assert accept.parse("text/html;q=2")
     == Error(accept.InvalidQValue("text/html;q=2"))

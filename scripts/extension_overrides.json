@@ -1,5 +1,5 @@
 {
-  "_comment": "Extension-to-MIME overrides merged on top of jshttp/mime-db. Each entry must mirror upstream's shape: { source: string, extensions: string[] }. The merge happens in scripts/generate_mime_db.sh and is regenerated into the FFI tables, so changes here MUST be followed by `just generate-db`. Entries here exist because upstream's mime-db carries the MIME type but leaves the `extensions` array empty (typical for IANA-registered formats whose canonical extension is documented elsewhere) or because the MIME type itself is community-standard rather than IANA-registered.",
+  "_comment": "Entries merged on top of jshttp/mime-db. Each entry replaces the upstream entry for that MIME type and must have the same shape: { source: string, extensions: string[] }. Run `just generate-db` after changing this file. An entry is here because upstream has the type but no extensions (common for IANA-registered types), because the type is not IANA-registered but is what detection reports, or because the type is community-standard. `source` is iana only for types in the IANA registry.",
   "application/jsonl": {
     "source": "custom",
     "extensions": ["jsonl"]
@@ -7,5 +7,66 @@
   "application/x-ndjson": {
     "source": "custom",
     "extensions": ["ndjson"]
+  },
+  "application/yaml": {
+    "source": "iana",
+    "compressible": true,
+    "extensions": ["yaml", "yml"]
+  },
+  "audio/flac": {
+    "source": "iana",
+    "extensions": ["flac"]
+  },
+  "application/vnd.debian.binary-package": {
+    "source": "iana",
+    "extensions": ["deb", "udeb"]
+  },
+  "application/vnd.ms-asf": {
+    "source": "iana",
+    "extensions": ["asf"]
+  },
+  "application/zstd": {
+    "source": "iana",
+    "extensions": ["zst"]
+  },
+  "audio/ac3": {
+    "source": "iana",
+    "extensions": ["ac3"]
+  },
+  "audio/amr-wb": {
+    "source": "iana",
+    "extensions": ["awb"]
+  },
+  "image/vnd.radiance": {
+    "source": "iana",
+    "extensions": ["hdr"]
+  },
+  "application/x-compress": {
+    "source": "apache",
+    "extensions": ["z"]
+  },
+  "application/x-archive": {
+    "source": "custom",
+    "extensions": ["a"]
+  },
+  "application/x-lz4": {
+    "source": "custom",
+    "extensions": ["lz4"]
+  },
+  "application/x-lzip": {
+    "source": "custom",
+    "extensions": ["lz"]
+  },
+  "application/x-snappy-framed": {
+    "source": "custom",
+    "extensions": ["sz"]
+  },
+  "image/x-qoi": {
+    "source": "custom",
+    "extensions": ["qoi"]
+  },
+  "image/x-exr": {
+    "source": "custom",
+    "extensions": ["exr"]
   }
 }

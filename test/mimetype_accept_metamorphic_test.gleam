@@ -19,7 +19,6 @@ import gleam/result
 import gleam/string
 import metamon
 import metamon/generator.{type Generator}
-import metamon/generator/range
 import mimetype
 import mimetype/accept
 
@@ -50,7 +49,7 @@ fn entry_gen() -> Generator(Entry) {
 /// Client entries with distinct media ranges: the RFC does not say which
 /// q-value wins when the same range is listed twice.
 fn entries_gen() -> Generator(List(Entry)) {
-  generator.list_of(entry_gen(), range.constant(1, 6))
+  generator.list_of(entry_gen(), generator.range(from: 1, to: 6))
   |> generator.map(fn(es) {
     list.fold(es, [], fn(acc, e) {
       case list.any(acc, fn(x: Entry) { x.range == e.range }) {
@@ -63,7 +62,10 @@ fn entries_gen() -> Generator(List(Entry)) {
 }
 
 fn offers_gen() -> Generator(List(String)) {
-  generator.list_of(generator.element_of(offer_pool), range.constant(1, 5))
+  generator.list_of(
+    generator.element_of(offer_pool),
+    generator.range(from: 1, to: 5),
+  )
   |> generator.map(list.unique)
 }
 
@@ -214,7 +216,7 @@ fn negotiate_encoding(
 pub fn negotiate_matches_rfc_9110_reference_model_test() -> Nil {
   metamon.forall(generator.tuple2(entries_gen(), offers_gen()), fn(input) {
     let #(entries, offers) = input
-    negotiate(entries, offers) == reference(entries, offers)
+    assert negotiate(entries, offers) == reference(entries, offers)
   })
 }
 
@@ -224,8 +226,8 @@ pub fn negotiate_ignores_the_order_of_client_entries_test() -> Nil {
       entries_gen(),
       offers_gen(),
       generator.list_of(
-        generator.int(range.constant(0, 99)),
-        range.constant(6, 6),
+        generator.int(generator.range(from: 0, to: 99)),
+        generator.range(from: 6, to: 6),
       ),
     ),
     fn(input) {
@@ -234,7 +236,7 @@ pub fn negotiate_ignores_the_order_of_client_entries_test() -> Nil {
         list.zip(entries, keys)
         |> list.sort(fn(a, b) { int.compare(a.1, b.1) })
         |> list.map(fn(p) { p.0 })
-      negotiate(shuffled, offers) == negotiate(entries, offers)
+      assert negotiate(shuffled, offers) == negotiate(entries, offers)
     },
   )
 }
@@ -243,10 +245,11 @@ pub fn negotiate_returns_an_offer_and_keeps_it_when_others_are_dropped_test() ->
   metamon.forall(generator.tuple2(entries_gen(), offers_gen()), fn(input) {
     let #(entries, offers) = input
     case negotiate(entries, offers) {
-      Error(Nil) -> True
-      Ok(chosen) ->
-        list.contains(offers, chosen)
-        && negotiate(entries, [chosen]) == Ok(chosen)
+      Error(Nil) -> Nil
+      Ok(chosen) -> {
+        assert list.contains(offers, chosen)
+        assert negotiate(entries, [chosen]) == Ok(chosen)
+      }
     }
   })
 }
@@ -259,15 +262,15 @@ pub fn negotiate_encoding_ignores_the_order_of_client_entries_test() -> Nil {
           generator.element_of(["gzip", "br", "zstd", "identity", "*"]),
           generator.element_of(["", ";q=0", ";q=0.5", ";q=1"]),
         ),
-        range.constant(1, 5),
+        generator.range(from: 1, to: 5),
       ),
       generator.list_of(
         generator.element_of(["gzip", "br", "zstd", "identity", "deflate"]),
-        range.constant(1, 4),
+        generator.range(from: 1, to: 4),
       ),
       generator.list_of(
-        generator.int(range.constant(0, 99)),
-        range.constant(5, 5),
+        generator.int(generator.range(from: 0, to: 99)),
+        generator.range(from: 5, to: 5),
       ),
     ),
     fn(input) {
@@ -287,8 +290,8 @@ pub fn negotiate_encoding_ignores_the_order_of_client_entries_test() -> Nil {
         |> list.sort(fn(a, b) { int.compare(a.1, b.1) })
         |> list.map(fn(p) { p.0 })
       let offers = list.unique(offers)
-      negotiate_encoding(header(shuffled), offers)
-      == negotiate_encoding(header(entries), offers)
+      assert negotiate_encoding(header(shuffled), offers)
+        == negotiate_encoding(header(entries), offers)
     },
   )
 }

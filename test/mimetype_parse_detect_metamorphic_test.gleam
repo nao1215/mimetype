@@ -12,7 +12,6 @@ import gleam/result
 import gleam/string
 import metamon
 import metamon/generator.{type Generator}
-import metamon/generator/range
 import mimetype
 
 fn param_value_gen() -> Generator(String) {
@@ -21,7 +20,7 @@ fn param_value_gen() -> Generator(String) {
       "a", "Z", "0", "-", ".", " ", ";", ",", "\"", "\\", "=", "/", "\t",
       "\u{00E9}",
     ]),
-    range.constant(0, 8),
+    generator.range(from: 0, to: 8),
   )
   |> generator.map(string.concat)
 }
@@ -46,7 +45,7 @@ fn header_gen() -> Generator(String) {
         param_value_gen(),
         generator.element_of(["; ", ";", " ; "]),
       ),
-      range.constant(0, 3),
+      generator.range(from: 0, to: 3),
     ),
   )
   |> generator.map(fn(t) {
@@ -62,9 +61,9 @@ pub fn to_string_round_trips_through_parse_test() -> Nil {
   metamon.forall(header_gen(), fn(header) {
     let assert Ok(parsed) = mimetype.parse(header)
     let wire = mimetype.to_string(parsed)
-    mimetype.parse(wire) == Ok(parsed)
-    && mimetype.parse_strict(wire) == Ok(parsed)
-    && mimetype.to_string(parsed) == wire
+    assert mimetype.parse(wire) == Ok(parsed)
+    assert mimetype.parse_strict(wire) == Ok(parsed)
+    assert mimetype.to_string(parsed) == wire
   })
 }
 
@@ -72,7 +71,7 @@ pub fn generated_headers_always_parse_test() -> Nil {
   // Every generated header is a valid quoted-string form, so a parse
   // error here is a parser bug rather than bad input.
   metamon.forall(header_gen(), fn(header) {
-    mimetype.parse(header) |> result.is_ok
+    assert mimetype.parse(header) |> result.is_ok
   })
 }
 
@@ -96,8 +95,8 @@ pub fn detect_only_reads_the_first_3072_bytes_test() -> Nil {
   metamon.forall(
     generator.tuple3(
       signature_gen(),
-      generator.bit_array(range.constant(0, 40)),
-      generator.bit_array(range.constant(1, 16)),
+      generator.bit_array(generator.range(from: 0, to: 40)),
+      generator.bit_array(generator.range(from: 1, to: 16)),
     ),
     fn(input) {
       let #(signature, tail, junk) = input
@@ -105,7 +104,8 @@ pub fn detect_only_reads_the_first_3072_bytes_test() -> Nil {
       let padding_size = 3072 - bit_array.byte_size(head)
       let padded = bit_array.append(head, <<0:size({ padding_size * 8 })>>)
       // Bytes appended after the first 3072 are never read.
-      mimetype.detect(bit_array.append(padded, junk)) == mimetype.detect(padded)
+      assert mimetype.detect(bit_array.append(padded, junk))
+        == mimetype.detect(padded)
     },
   )
 }

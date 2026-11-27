@@ -137,7 +137,7 @@ pub fn doc_accept_test() {
   assert accept.parse("text/html, */*;q=0.1")
     == Ok([
       accept.AcceptItem(accept.Specific(html), quality: 1.0),
-      accept.AcceptItem(accept.AnyType, quality: 0.1),
+      accept.AcceptItem(accept.AnyType([]), quality: 0.1),
     ])
   assert accept.parse("text/html;q=2")
     == Error(accept.InvalidQValue("text/html;q=2"))

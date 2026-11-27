@@ -33,10 +33,11 @@ pub type MediaRange {
   /// matches when it has the same essence and every one of these
   /// parameters.
   Specific(MimeType)
-  /// `type/*`. The type is lowercase. Parameters on it are ignored.
-  TypeWildcard(type_: String)
-  /// `*/*`. Parameters on it are ignored.
-  AnyType
+  /// `type/*`. The type is lowercase. An offer matches when it has this
+  /// type and every one of the parameters.
+  TypeWildcard(type_: String, parameters: List(#(String, String)))
+  /// `*/*`. Every offer that has all of the parameters matches.
+  AnyType(parameters: List(#(String, String)))
 }
 
 /// One entry of an `Accept` header.
@@ -76,7 +77,8 @@ pub type AcceptError {
 /// Empty entries and the whitespace around entries and parameters are
 /// ignored, and an empty header gives `Ok([])`. A parameter named `q`
 /// is the weight wherever it appears; every other parameter belongs to
-/// the media range (RFC 9110 section 12.5.1).
+/// the media range, wildcards included (RFC 9110 section 12.5.1).
+/// Parameter names are lowercase and quoted values are unquoted.
 ///
 /// ## Examples
 ///
@@ -84,7 +86,7 @@ pub type AcceptError {
 /// accept.parse("text/html, */*;q=0.1")
 /// // -> Ok([
 /// //   AcceptItem(Specific(html), quality: 1.0),
-/// //   AcceptItem(AnyType, quality: 0.1),
+/// //   AcceptItem(AnyType([]), quality: 0.1),
 /// // ])
 /// ```
 ///
@@ -120,49 +122,57 @@ fn parse_media_range(
   range: String,
   parameters: List(String),
 ) -> Result(MediaRange, Nil) {
-  case string.split_once(string.lowercase(range), on: "/") {
-    Ok(#("*", "*")) -> Ok(AnyType)
+  let joined =
+    [range, ..list.map(parameters, string.trim)]
+    |> string.join("; ")
+  // `*` is a token character, so wildcard ranges parse like any media
+  // type and share its parameter rules.
+  use #(essence, parameters) <- result.try(
+    parse_internal.parse_string(joined) |> result.replace_error(Nil),
+  )
+  case string.split_once(essence, on: "/") {
+    Ok(#("*", "*")) -> Ok(AnyType(parameters:))
     Ok(#("*", _)) -> Error(Nil)
-    Ok(#(type_, "*")) ->
-      case parse_internal.is_token(type_) {
-        True -> Ok(TypeWildcard(type_:))
-        False -> Error(Nil)
-      }
-    Ok(_) ->
-      [range, ..list.map(parameters, string.trim)]
-      |> string.join("; ")
-      |> mimetype.parse
+    Ok(#(type_, "*")) -> Ok(TypeWildcard(type_:, parameters:))
+    _ ->
+      mimetype.parse(joined)
       |> result.map(Specific)
       |> result.replace_error(Nil)
-    Error(Nil) -> Error(Nil)
   }
 }
 
 /// Sorts entries from most to least preferred: by `quality`, then by
-/// precedence (RFC 9110 section 12.5.1): `type/subtype` with more
-/// parameters before fewer, then `type/*`, then `*/*`. Entries that tie
-/// keep their order.
+/// precedence (RFC 9110 section 12.5.1): `type/subtype`, then `type/*`,
+/// then `*/*`, and within each of these more parameters before fewer.
+/// Entries that tie keep their order.
 ///
 pub fn prefer(items: List(AcceptItem)) -> List(AcceptItem) {
   list.sort(items, fn(a, b) { compare_scores(score(b), score(a)) })
 }
 
+// `precedence` ranks the kind of range, `parameters` breaks ties
+// between ranges of the same kind.
 type Score {
-  Score(quality: Float, precedence: Int)
+  Score(quality: Float, precedence: Int, parameters: Int)
 }
 
 fn score(item: AcceptItem) -> Score {
-  let precedence = case item.range {
-    AnyType -> 0
-    TypeWildcard(_) -> 1
-    Specific(range) -> 2 + list.length(parameters(range))
+  let #(precedence, parameters) = case item.range {
+    AnyType(parameters:) -> #(0, list.length(parameters))
+    TypeWildcard(parameters:, ..) -> #(1, list.length(parameters))
+    Specific(range) -> #(2, list.length(parameters(range)))
   }
-  Score(quality: item.quality, precedence:)
+  Score(quality: item.quality, precedence:, parameters:)
 }
 
 fn compare_scores(a: Score, b: Score) -> Order {
   use <- order.lazy_break_tie(float.compare(a.quality, b.quality))
-  int.compare(a.precedence, b.precedence)
+  compare_precedence(a, b)
+}
+
+fn compare_precedence(a: Score, b: Score) -> Order {
+  use <- order.lazy_break_tie(int.compare(a.precedence, b.precedence))
+  int.compare(a.parameters, b.parameters)
 }
 
 /// Picks the server offer the client prefers.
@@ -225,7 +235,7 @@ pub fn negotiate(
 fn decide(scores: List(Score)) -> Result(Score, Nil) {
   list.reduce(scores, fn(a, b) {
     let order = {
-      use <- order.lazy_break_tie(int.compare(a.precedence, b.precedence))
+      use <- order.lazy_break_tie(compare_precedence(a, b))
       float.compare(a.quality, b.quality)
     }
     case order {
@@ -259,15 +269,23 @@ fn range_matches(
   offer_parameters: List(#(String, String)),
 ) -> Bool {
   case range {
-    AnyType -> True
-    TypeWildcard(type_:) ->
+    AnyType(parameters:) -> has_all(offer_parameters, parameters)
+    TypeWildcard(type_:, parameters:) ->
       string.starts_with(mimetype.essence(offer), type_ <> "/")
+      && has_all(offer_parameters, parameters)
     Specific(range) ->
       mimetype.essence(range) == mimetype.essence(offer)
-      && list.all(parameters(range), fn(parameter) {
-        list.any(offer_parameters, same_parameter(parameter, _))
-      })
+      && has_all(offer_parameters, parameters(range))
   }
+}
+
+fn has_all(
+  offer_parameters: List(#(String, String)),
+  range_parameters: List(#(String, String)),
+) -> Bool {
+  list.all(range_parameters, fn(parameter) {
+    list.any(offer_parameters, same_parameter(parameter, _))
+  })
 }
 
 // Parameter names are lowercase already. RFC 9110 section 8.3.2 makes
@@ -366,7 +384,9 @@ pub fn negotiate_value(
     value_score(client_accepts, string.lowercase(offer))
     |> result.try(acceptable)
     // The entry decided the quality; ties go to the earlier offer.
-    |> result.map(fn(score) { #(index, offer, Score(..score, precedence: 0)) })
+    |> result.map(fn(score) {
+      #(index, offer, Score(..score, precedence: 0, parameters: 0))
+    })
   })
   |> pick
 }
@@ -383,14 +403,20 @@ fn value_score(items: List(ValueItem), offer: String) -> Result(Score, Nil) {
         && string.starts_with(offer, item.value <> "-")
       {
         True ->
-          Ok(Score(quality: item.quality, precedence: string.length(item.value)))
+          Ok(Score(
+            quality: item.quality,
+            precedence: string.length(item.value),
+            parameters: 0,
+          ))
         False -> Error(Nil)
       }
     })
   use <- result.lazy_or(decide(matching))
   case list.find(items, fn(item) { item.value == "*" }), offer {
-    Ok(wildcard), _ -> Ok(Score(quality: wildcard.quality, precedence: 0))
-    Error(Nil), "identity" -> Ok(Score(quality: 0.001, precedence: 0))
+    Ok(wildcard), _ ->
+      Ok(Score(quality: wildcard.quality, precedence: 0, parameters: 0))
+    Error(Nil), "identity" ->
+      Ok(Score(quality: 0.001, precedence: 0, parameters: 0))
     Error(Nil), _ -> Error(Nil)
   }
 }

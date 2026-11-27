@@ -288,3 +288,14 @@ pub fn zlib_flag_bytes_test() {
   })
   assert detected(<<0x78, 0x02, 0x00>>) != Ok("application/zlib")
 }
+
+// A backslash in a quoted-string escapes one character only, so the
+// closing quote after `\\` still ends the string and the separators
+// after it split again.
+pub fn escape_in_a_quoted_value_covers_one_character_test() {
+  let assert Ok(parsed) = mimetype.parse("text/plain; a=\"x\\\\\"; b=c")
+  assert mimetype.parameter(parsed, "a") == Ok("x\\")
+  assert mimetype.parameter(parsed, "b") == Ok("c")
+  let assert Ok(items) = accept.parse("text/plain;a=\"\\\\\", text/html")
+  assert list.length(items) == 2
+}

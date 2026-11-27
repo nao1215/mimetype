@@ -25,28 +25,22 @@
 
 ## Nightly runs
 
-`.github/workflows/nightly-property.yml` runs the whole suite ten times with `METAMON_RUNS_MULTIPLIER=10`, each pass with a new seed. A failure report prints its seed, so the case can be replayed with `metamon.with_seed` and kept as a regression test.
+`.github/workflows/nightly-property.yml` runs the whole suite ten times with `METAMON_RUNS_MULTIPLIER=10`, each pass with a new seed. A failure report prints its seed, so the case can be replayed with `seed: Some(n)` in `metamon.Config` and kept as a regression test.
 
 ## Mutation testing
 
-There is no mutation testing tool for Gleam, so `gleam_mutate.py` (from the mutation-testing lab in nao1215/debimate, with integer comparison and arithmetic operators added) is run by hand on a copy of the project. It rewrites one operator or boolean result at a time (`==`/`!=`, `<`/`<=`, `>`/`>=`, `+`/`-`, `&&`/`||`, `-> True`/`-> False`, a dropped `!`) and runs `gleam test` on the Erlang target. The score is killed / (killed + lived).
+`gleam run -m metamon/mutation` (metamon 0.16.0) mutates every module under `src/`: `==` and `!=` swapped, `<` and `<=`, `>` and `>=` moved across the boundary, `&&` and `||` swapped, `!` dropped, `True` and `False` swapped, and the arithmetic operators swapped, and runs `gleam test` on the Erlang target for each mutant. The MIME database tables live in the FFI files, so no module is excluded. `.github/workflows/mutation.yml` mutates the modules a pull request changes and fails on a survivor that `doc/mutation/baseline.json` does not list; the weekly run mutates every module. `just mutation` runs it locally and `just mutation-record` records the baseline. The score is (killed + timed out) / (killed + timed out + lived). The first run (2026-11-27) scored 98.2% with 5 survivors; a test for the escape in quoted values (`test/mimetype_boundary_test.gleam`) killed one of them, which raised the score to 98.5%. The other 4 are equivalent mutants and stay in the baseline: `is_a` in `internal/predicates` guards against an empty essence (2), which no `MimeType` has; the JSON sniffer passes `first: True` for a number that starts with a digit (1), and the digit is always read before the flag matters; and the ASCII case folding of the HTML patterns accepts `Z` (1), which no pattern contains in lower case.
 
-| Date | Files | Killed | Lived | Score |
-|---|---|---:|---:|---:|
-| 2026-11-19 | every module under `src/`, with the metamorphic tests | 190 | 158 | 54.6% |
-| 2026-11-19 | the same, after the detection differential tests and the UTF-8 fix | 218 | 125 | 63.6% |
-| 2026-11-23 | every module under `src/` at v0.27.0 | 219 | 115 | 65.6% |
-| 2026-11-23 | after the table-driven signatures and the specification fixes | 174 | 58 | 75.0% |
-| 2026-11-23 | after `test/mimetype_boundary_test.gleam` | 244 | 1 | 99.6% |
-
-The one survivor turns `byte <= 0x5A` into `byte < 0x5A` in the ASCII case folding of the HTML patterns. No pattern contains `z`, so the mutant is equivalent.
-
-The table-driven signatures removed most of the earlier survivors in `internal/magic`, since a row has no comparisons to mutate. The rest were real gaps, now covered: the EBML DocType search window, the zstd magic ranges, the ZIP walk over extra fields, data and its 20-entry budget, the JSON depth limit and number grammar, the tag-terminating bytes, the UTF-8 lead and continuation ranges, a sequence cut by the 3072-byte limit, the 1024-byte declaration window, and the length of a primary language subtag.
-
-Survivors of the 2026-11-19 runs, for reference:
-
-- `internal/magic` (91): the JSON sniffer (`json_validate_*`, `json_skip_*`), ZIP directory walking and container signatures, where a weakened check still lands on the same answer for every input in the suite. The differential test only feeds valid JSON, so mutants that accept more are not caught.
-- `internal/charset` (20): the scan's byte counters, which only matter for inputs longer than its 1024-byte budget, and the `<meta>` attribute terminators.
-- `internal/parse` (5) and `internal/predicates` (2): token-character ranges and `is_text` branches whose other arms give the same answer for the essences in the suite.
-- `accept` (5): quote stripping of accept-ext values, which nothing inspects, and the `*/*`-only shortcut, which the general path reproduces.
-- `internal/detect` (2): `truncate_to_limit` at 0 and at the input length, where both sides of the comparison slice the same bytes. The module was removed after these runs.
+<!-- mutation:start -->
+| Module | Killed | Lived | Timed out | Score |
+|---|---:|---:|---:|---:|
+| `mimetype` | 7 | 0 | 0 | 100.0% |
+| `mimetype/accept` | 21 | 0 | 0 | 100.0% |
+| `mimetype/internal/accept` | 10 | 0 | 0 | 100.0% |
+| `mimetype/internal/charset` | 69 | 0 | 0 | 100.0% |
+| `mimetype/internal/hierarchy` | 1 | 0 | 0 | 100.0% |
+| `mimetype/internal/magic` | 99 | 2 | 0 | 98.0% |
+| `mimetype/internal/parse` | 43 | 0 | 0 | 100.0% |
+| `mimetype/internal/predicates` | 20 | 2 | 0 | 90.9% |
+| all | 270 | 4 | 0 | 98.5% |
+<!-- mutation:end -->

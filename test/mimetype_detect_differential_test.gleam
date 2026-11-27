@@ -19,7 +19,6 @@ import gleam/result
 import gleam/string
 import metamon
 import metamon/generator.{type Generator}
-import metamon/generator/range
 import mimetype
 
 fn utf8_piece_gen() -> Generator(BitArray) {
@@ -62,7 +61,7 @@ fn utf8_piece_gen() -> Generator(BitArray) {
 }
 
 fn text_gen() -> Generator(BitArray) {
-  generator.list_of(utf8_piece_gen(), range.constant(1, 40))
+  generator.list_of(utf8_piece_gen(), generator.range(from: 1, to: 40))
   |> generator.map(fn(pieces) { bit_array.concat([<<"x":utf8>>, ..pieces]) })
 }
 
@@ -108,7 +107,7 @@ pub fn detect_charset_utf8_scan_matches_the_standard_library_test() -> Nil {
       Ok(charset) -> Ok(charset)
       Error(_) -> Error(Nil)
     }
-    actual == expected
+    assert actual == expected
   })
 }
 
@@ -117,7 +116,10 @@ fn json_gen(depth: Int) -> Generator(json.Json) {
     generator.one_of([
       generator.return(json.null()),
       generator.map(generator.bool(), json.bool),
-      generator.map(generator.int(range.constant(-100_000, 100_000)), json.int),
+      generator.map(
+        generator.int(generator.range(from: -100_000, to: 100_000)),
+        json.int,
+      ),
       generator.map(generator.float(-1000.0, 1000.0), json.float),
       generator.map(
         generator.element_of(["", "a", "\"", "\\", "\n", "\u{00E9}", "{[,:]}"]),
@@ -136,14 +138,14 @@ fn json_gen(depth: Int) -> Generator(json.Json) {
 
 fn container_gen(depth: Int) -> Generator(json.Json) {
   generator.one_of([
-    generator.list_of(json_gen(depth), range.constant(0, 4))
+    generator.list_of(json_gen(depth), generator.range(from: 0, to: 4))
       |> generator.map(fn(items) { json.preprocessed_array(items) }),
     generator.list_of(
       generator.tuple2(
         generator.element_of(["a", "key", "\u{00E9}", "\""]),
         json_gen(depth),
       ),
-      range.constant(0, 4),
+      generator.range(from: 0, to: 4),
     )
       |> generator.map(json.object),
   ])
@@ -160,11 +162,11 @@ pub fn documents_gleam_json_writes_are_detected_as_json_test() -> Nil {
       let text = padding <> json.to_string(document) <> padding
       // The oracle: gleam_json reads it back, so it is valid JSON.
       let assert Ok(_) = json.parse(text, decode.dynamic)
-      mimetype.essence({
-        mimetype.detect(bit_array.from_string(text))
-        |> result.unwrap(mimetype.octet_stream)
-      })
-      == "application/json"
+      assert mimetype.essence({
+          mimetype.detect(bit_array.from_string(text))
+          |> result.unwrap(mimetype.octet_stream)
+        })
+        == "application/json"
     },
   )
 }
@@ -172,11 +174,11 @@ pub fn documents_gleam_json_writes_are_detected_as_json_test() -> Nil {
 pub fn json_detection_ignores_a_leading_bom_test() -> Nil {
   metamon.forall(container_gen(1), fn(document) {
     let bytes = bit_array.from_string(json.to_string(document))
-    list.all([bytes, <<0xEF, 0xBB, 0xBF, bytes:bits>>], fn(b) {
-      mimetype.essence({
-        mimetype.detect(b) |> result.unwrap(mimetype.octet_stream)
-      })
-      == "application/json"
+    list.each([bytes, <<0xEF, 0xBB, 0xBF, bytes:bits>>], fn(b) {
+      assert mimetype.essence({
+          mimetype.detect(b) |> result.unwrap(mimetype.octet_stream)
+        })
+        == "application/json"
     })
   })
 }

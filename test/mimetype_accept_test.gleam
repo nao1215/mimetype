@@ -1,3 +1,4 @@
+import gleam/int
 import gleam/list
 import gleeunit
 import mimetype
@@ -20,8 +21,8 @@ fn essences(items: List(accept.AcceptItem)) -> List(String) {
   list.map(items, fn(item) {
     case item.range {
       accept.Specific(m) -> mimetype.essence(m)
-      accept.TypeWildcard(t) -> t <> "/*"
-      accept.AnyType -> "*/*"
+      accept.TypeWildcard(t, ..) -> t <> "/*"
+      accept.AnyType(..) -> "*/*"
     }
   })
 }
@@ -55,14 +56,14 @@ pub fn parse_star_star_test() {
   let assert Ok(items) = accept.parse("*/*")
   assert items
     |> ranges
-    == [accept.AnyType]
+    == [accept.AnyType([])]
 }
 
 pub fn parse_type_wildcard_test() {
   let assert Ok(items) = accept.parse("image/*")
   assert items
     |> ranges
-    == [accept.TypeWildcard("image")]
+    == [accept.TypeWildcard("image", [])]
 }
 
 pub fn parse_multiple_entries_test() {
@@ -491,8 +492,8 @@ pub fn prefer_orders_by_rfc_precedence_test() {
     |> list.map(fn(item) {
       case item.range {
         accept.Specific(m) -> mimetype.to_string(m)
-        accept.TypeWildcard(t) -> t <> "/*"
-        accept.AnyType -> "*/*"
+        accept.TypeWildcard(t, ..) -> t <> "/*"
+        accept.AnyType(..) -> "*/*"
       }
     })
     == ["text/plain; format=flowed", "text/plain", "text/*", "*/*"]
@@ -591,4 +592,106 @@ pub fn prefix_match_is_for_primary_language_subtags_test() {
 pub fn invalid_range_parameter_reports_the_entry_test() {
   assert accept.parse("text/html;q=0.5;a b=c, */*")
     == Error(accept.InvalidMediaRange("text/html;q=0.5;a b=c"))
+}
+
+// §12.5.1: parameters may follow any media range, wildcards included,
+// and an offer must carry them to match.
+pub fn wildcard_range_parameters_must_match_the_offer_test() {
+  let assert Ok(items) = accept.parse("text/*;charset=utf-8")
+  assert accept.negotiate(items, [mt("text/plain;charset=iso-8859-1")])
+    == Error(Nil)
+  assert accept.negotiate(items, [mt("text/plain")]) == Error(Nil)
+  assert accept.negotiate(items, [
+      mt("text/plain;charset=iso-8859-1"),
+      mt("text/plain;charset=UTF-8"),
+    ])
+    == Ok(mt("text/plain;charset=UTF-8"))
+  assert accept.negotiate(items, [mt("application/json;charset=utf-8")])
+    == Error(Nil)
+  let assert Ok(items) = accept.parse("*/*;charset=utf-8")
+  assert accept.negotiate(items, [mt("application/json")]) == Error(Nil)
+  assert accept.negotiate(items, [mt("application/json;charset=utf-8")])
+    == Ok(mt("application/json;charset=utf-8"))
+}
+
+// `q` is the weight wherever it sits; the other parameters stay on the
+// wildcard range.
+pub fn wildcard_range_keeps_parameters_around_q_test() {
+  let assert Ok(items) = accept.parse("text/*;q=0.5;format=flowed")
+  assert accept.negotiate(items, [mt("text/plain")]) == Error(Nil)
+  assert accept.negotiate(items, [mt("text/plain;format=flowed")])
+    == Ok(mt("text/plain;format=flowed"))
+}
+
+// Quoted values compare by their content, so "utf-8" and utf-8 agree.
+pub fn wildcard_range_parameters_may_be_quoted_test() {
+  let assert Ok(items) = accept.parse("text/*;charset=\"utf-8\"")
+  assert accept.negotiate(items, [mt("text/plain;charset=utf-8")])
+    == Ok(mt("text/plain;charset=utf-8"))
+  let assert Ok(items) = accept.parse("*/*;tag=\"a,b\", text/html;q=0.1")
+  assert accept.negotiate(items, [mt("text/html"), mt("text/csv;tag=\"a,b\"")])
+    == Ok(mt("text/csv;tag=\"a,b\""))
+}
+
+// A wildcard range with more parameters is more specific than one with
+// fewer, so its q value decides for the offers it matches.
+pub fn wildcard_parameters_raise_precedence_test() {
+  let assert Ok(items) = accept.parse("text/*;q=0.5, text/*;charset=utf-8;q=0")
+  assert accept.negotiate(items, [mt("text/plain;charset=utf-8")]) == Error(Nil)
+  assert accept.negotiate(items, [mt("text/plain")]) == Ok(mt("text/plain"))
+  let assert Ok(items) = accept.parse("*/*;q=0.5, */*;charset=utf-8;q=0")
+  assert accept.negotiate(items, [mt("image/png;charset=utf-8")]) == Error(Nil)
+}
+
+// Parameters order ranges of the same kind only: text/plain is more
+// specific than text/* with any number of parameters, and text/* is
+// more specific than */* with any number of parameters.
+pub fn parameters_do_not_outrank_a_narrower_range_test() {
+  let assert Ok(items) =
+    accept.parse("text/plain;q=0, text/*;charset=utf-8;a=b")
+  assert accept.negotiate(items, [mt("text/plain;charset=utf-8;a=b")])
+    == Error(Nil)
+  let assert Ok(items) = accept.parse("text/*;q=0, */*;charset=utf-8;a=b")
+  assert accept.negotiate(items, [mt("text/plain;charset=utf-8;a=b")])
+    == Error(Nil)
+}
+
+// Wildcard ranges keep their parameters: names lowercase, quoted values
+// unquoted, `q` taken out wherever it sits.
+pub fn parse_keeps_wildcard_parameters_test() {
+  assert accept.parse("TEXT/*;Charset=utf-8;q=0.5;format=\"a, b\"")
+    == Ok([
+      accept.AcceptItem(
+        accept.TypeWildcard("text", [
+          #("charset", "utf-8"),
+          #("format", "a, b"),
+        ]),
+        quality: 0.5,
+      ),
+    ])
+  assert accept.parse("*/*;level=1")
+    == Ok([accept.AcceptItem(accept.AnyType([#("level", "1")]), quality: 1.0)])
+  assert accept.parse("text/*;a b=c")
+    == Error(accept.InvalidMediaRange("text/*;a b=c"))
+  assert accept.parse("*/*;a=\"\u{0001}\"")
+    == Error(accept.InvalidMediaRange("*/*;a=\"\u{0001}\""))
+}
+
+// More parameters rank first among ranges of the same kind only.
+pub fn prefer_counts_wildcard_parameters_test() {
+  let assert Ok(items) =
+    accept.parse(
+      "*/*, */*;a=1;b=2, text/*, text/*;charset=utf-8, text/plain, text/*;a=1;b=2;c=3",
+    )
+  assert accept.prefer(items)
+    |> list.map(fn(item) {
+      case item.range {
+        accept.Specific(m) -> mimetype.to_string(m)
+        accept.TypeWildcard(t, parameters) ->
+          t <> "/*" <> int.to_string(list.length(parameters))
+        accept.AnyType(parameters) ->
+          "*/*" <> int.to_string(list.length(parameters))
+      }
+    })
+    == ["text/plain", "text/*3", "text/*1", "text/*0", "*/*2", "*/*0"]
 }

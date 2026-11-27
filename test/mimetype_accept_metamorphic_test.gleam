@@ -3,12 +3,13 @@
 //// - Differential: `accept.negotiate` against a small reference
 ////   model of RFC 9110 §12.5.1 written here, where the most specific
 ////   matching media range decides an offer's q-value (so `text/html;q=0`
-////   excludes text/html even with `*/*` present), and a `type/subtype`
-////   range with a parameter matches only offers that carry it.
+////   excludes text/html even with `*/*` present), and a range with a
+////   parameter, wildcard or not, matches only offers that carry it.
 //// - Metamorphic: the order of the client's entries never changes the
 ////   result, the result is always one of the offers, and dropping offers
 ////   other than the chosen one keeps it chosen.
 
+import gleam/bool
 import gleam/float
 import gleam/int
 import gleam/list
@@ -105,13 +106,11 @@ fn is_specific(range: String) -> Bool {
   range != "*/*" && !string.ends_with(range, "/*")
 }
 
-// Wildcard ranges ignore their parameters.
 fn precedence(e: Entry) -> Int {
-  case e.range, is_specific(e.range), e.parameter {
-    "*/*", _, _ -> 0
-    _, False, _ -> 1
-    _, True, False -> 2
-    _, True, True -> 3
+  case e.range, is_specific(e.range) {
+    "*/*", _ -> 0
+    _, False -> 1
+    _, True -> 2
   }
 }
 
@@ -120,15 +119,18 @@ fn matches(e: Entry, offer: String) -> Bool {
     Ok(#(essence, _)) -> #(essence, True)
     Error(Nil) -> #(offer, False)
   }
-  case e.range, is_specific(e.range) {
+  let range_matches = case e.range, is_specific(e.range) {
     "*/*", _ -> True
     range, False -> string.starts_with(essence, string.drop_end(range, 1))
-    range, True -> range == essence && { !e.parameter || offer_has_parameter }
+    range, True -> range == essence
   }
+  range_matches && { !e.parameter || offer_has_parameter }
 }
 
+// The kind of range first, then whether it has a parameter.
 fn entry_key(e: Entry) -> #(Int, Int) {
-  #(precedence(e), 0)
+  use <- bool.guard(when: !e.parameter, return: #(precedence(e), 0))
+  #(precedence(e), 1)
 }
 
 fn more_specific(a: Entry, b: Entry) -> Entry {

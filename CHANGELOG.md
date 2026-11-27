@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `accept.parse` keeps the parameters of `type/*` and `*/*` ranges (RFC 9110 section 12.5.1). `TypeWildcard` gains a `parameters` field and `AnyType` becomes `AnyType(parameters:)`, which breaks code that pattern matches on them.
+- `accept.negotiate` matches a wildcard range only against offers that carry its parameters, so `text/*;charset=utf-8` no longer accepts `text/plain;charset=iso-8859-1`. `charset` values are compared without regard to case, as for `type/subtype` ranges.
+- `accept.prefer` and `accept.negotiate` rank a wildcard range with more parameters before one with fewer. Parameters order ranges of the same kind only, so `text/plain` still outranks `text/*;charset=utf-8`.
+
 ## [0.28.0] - 2026-11-23
 
 ### Removed

@@ -27,6 +27,10 @@
 
 `.github/workflows/nightly-property.yml` runs the whole suite ten times with `METAMON_RUNS_MULTIPLIER=10`, each pass with a new seed. A failure report prints its seed, so the case can be replayed with `seed: Some(n)` in `metamon.Config` and kept as a regression test.
 
+## Coverage
+
+`gleam run -m metamon/mutation -- coverage` (`just coverage`, after `gleam build --target erlang`) runs the tests on the Erlang target with every module under `src/` measured and writes `build/coverage/lcov.info`; `.github/workflows/coverage.yml` reports it with octocov on pull requests and main. On 2026-11-28 it reached 96.9% of lines (600 of 619).
+
 ## Mutation testing
 
 `gleam run -m metamon/mutation` (metamon 0.16.0) mutates every module under `src/`: `==` and `!=` swapped, `<` and `<=`, `>` and `>=` moved across the boundary, `&&` and `||` swapped, `!` dropped, `True` and `False` swapped, and the arithmetic operators swapped, and runs `gleam test` on the Erlang target for each mutant. The MIME database tables live in the FFI files, so no module is excluded. `.github/workflows/mutation.yml` mutates the modules a pull request changes and fails on a survivor that `doc/mutation/baseline.json` does not list; the weekly run mutates every module. `just mutation` runs it locally and `just mutation-record` records the baseline. The score is (killed + timed out) / (killed + timed out + lived). The first run (2026-11-27) scored 98.2% with 5 survivors; a test for the escape in quoted values (`test/mimetype_boundary_test.gleam`) killed one of them, which raised the score to 98.5%. The other 4 are equivalent mutants and stay in the baseline: `is_a` in `internal/predicates` guards against an empty essence (2), which no `MimeType` has; the JSON sniffer passes `first: True` for a number that starts with a digit (1), and the digit is always read before the flag matters; and the ASCII case folding of the HTML patterns accepts `Z` (1), which no pattern contains in lower case.
